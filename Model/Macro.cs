@@ -39,12 +39,12 @@ namespace _4RTools.Model
         // Runtime state — not persisted in profile
         [JsonIgnore] public int currentChainStep { get; set; } = 0;
         [JsonIgnore] public DateTime skill2SentAt { get; set; } = DateTime.MinValue;
-        // Per-step last-sent timestamps: index = step (0-based).
-        // Used for both step timeout detection and per-step local cooldown checks.
-        // Intentionally NOT reset on ResetChainState so CD tracking survives chain resets.
+        // Per-step last-sent timestamps. Preserved across chain resets for CD tracking.
         [JsonIgnore] public DateTime[] stepLastSentAt = new DateTime[7];
-        // How long (ms) to wait for skill N to be accepted before resetting to step 0.
-        // 300ms covers instant-cast skills + server RTT with margin.
+        // Per-step "when did we arrive here in the current chain run" timestamps.
+        // Reset in ResetChainState() so stale values from previous runs never trigger spurious timeouts.
+        [JsonIgnore] public DateTime[] stepAttemptedAt = new DateTime[7];
+        // How long (ms) to wait at a step before treating it as failed and resetting to step 0.
         [JsonIgnore] public int stepTimeoutMs { get; set; } = 300;
         // Window (ms) after skill 2 during which skills 3/4 are sent (server combo state duration).
         [JsonIgnore] public int comboWindowMs { get; set; } = 3000;
@@ -76,7 +76,8 @@ namespace _4RTools.Model
         public void ResetChainState()
         {
             currentChainStep = 0;
-            // stepLastSentAt is preserved — it tracks per-step fire times for CD checks.
+            stepAttemptedAt = new DateTime[7];
+            // stepLastSentAt preserved — CD tracking must survive chain resets.
         }
     }
 
@@ -163,14 +164,18 @@ namespace _4RTools.Model
                 Dictionary<string, MacroKey> macro = chainConfig.macroEntries;
                 int step = chainConfig.currentChainStep;
 
-                // Step timeout: skill at current step probably failed server-side — retry skill 1.
-                DateTime lastSentForStep = chainConfig.stepLastSentAt[step];
-                bool stepTimedOut = lastSentForStep != DateTime.MinValue
-                    && (DateTime.Now - lastSentForStep).TotalMilliseconds > chainConfig.stepTimeoutMs;
+                // Step timeout: if we've been stuck at this step too long, the skill probably
+                // failed server-side. Reset to step 0 and try again.
+                // Uses stepAttemptedAt (reset per chain run) — NOT stepLastSentAt (which is
+                // never reset and would trigger spurious timeouts on re-press after release).
+                if (chainConfig.stepAttemptedAt[step] == DateTime.MinValue)
+                    chainConfig.stepAttemptedAt[step] = DateTime.Now;
+
+                bool stepTimedOut = (DateTime.Now - chainConfig.stepAttemptedAt[step]).TotalMilliseconds > chainConfig.stepTimeoutMs;
 
                 if (stepTimedOut)
                 {
-                    chainConfig.currentChainStep = 0;
+                    chainConfig.ResetChainState();
                     step = 0;
                 }
 
@@ -225,7 +230,15 @@ namespace _4RTools.Model
                 bool chainComplete = !macro.ContainsKey("in" + (nextStep + 1) + "mac" + chainConfig.id)
                     || macro["in" + (nextStep + 1) + "mac" + chainConfig.id].key == Key.None;
 
-                chainConfig.currentChainStep = chainComplete ? 0 : nextStep;
+                if (chainComplete)
+                {
+                    chainConfig.ResetChainState();
+                }
+                else
+                {
+                    chainConfig.currentChainStep = nextStep;
+                    chainConfig.stepAttemptedAt[nextStep] = DateTime.Now;
+                }
             }
             Thread.Sleep(15);
             return 0;
