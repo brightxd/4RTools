@@ -19,6 +19,7 @@ namespace _4RTools.Forms
             InitializeComponent();
             configureMacroLanes();
             addCooldownControls();
+            addOptionalControls();
         }
 
         public void Update(ISubject subject)
@@ -86,6 +87,15 @@ namespace _4RTools.Forms
                         cdInput.Value = hasEntry ? chainConfig.macroEntries[cbName].cooldownMs : 0;
                         cdInput.ValueChanged += this.onCooldownChange;
                     }
+
+                    Control[] op = group.Controls.Find($"{cbName}opt", true);
+                    if (op.Length > 0)
+                    {
+                        CheckBox optInput = (CheckBox)op[0];
+                        optInput.CheckedChanged -= this.onOptionalChange;
+                        optInput.Checked = hasEntry && chainConfig.macroEntries[cbName].optional;
+                        optInput.CheckedChanged += this.onOptionalChange;
+                    }
                 }
             }
             catch { };
@@ -104,8 +114,11 @@ namespace _4RTools.Forms
             int existingCooldown = chainConfig.macroEntries.ContainsKey(textBox.Name)
                 ? chainConfig.macroEntries[textBox.Name].cooldownMs
                 : 0;
+            bool existingOptional = chainConfig.macroEntries.ContainsKey(textBox.Name)
+                && chainConfig.macroEntries[textBox.Name].optional;
             chainConfig.macroEntries[textBox.Name] = new MacroKey(key, decimal.ToInt16(delayInput.Value));
             chainConfig.macroEntries[textBox.Name].cooldownMs = existingCooldown;
+            chainConfig.macroEntries[textBox.Name].optional = existingOptional;
 
             bool isFirstInput = Regex.IsMatch(textBox.Name, $"in1mac{chainID}");
             if (isFirstInput) { chainConfig.trigger = key; }
@@ -148,6 +161,58 @@ namespace _4RTools.Forms
             {
                 chainConfig.macroEntries[cbName].cooldownMs = decimal.ToInt32(cdInput.Value);
                 ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
+            }
+        }
+
+        private void onOptionalChange(object sender, EventArgs e)
+        {
+            CheckBox optInput = (CheckBox)sender;
+            int chainID = Int16.Parse(optInput.Parent.Name.Split(new[] { "chainGroup" }, StringSplitOptions.None)[1]);
+            ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
+
+            String cbName = optInput.Name.Split(new[] { "opt" }, StringSplitOptions.None)[0];
+            if (chainConfig.macroEntries.ContainsKey(cbName))
+            {
+                chainConfig.macroEntries[cbName].optional = optInput.Checked;
+                ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
+            }
+        }
+
+        private void addOptionalControls()
+        {
+            const int OPT_ROW_Y = 117;
+            const int EXPAND = 20;
+            const int GAP = 4;
+            int[] slotX = { 66, 135, 204, 273, 342, 411, 480 };
+
+            int y = 12;
+            for (int i = 1; i <= TOTAL_MACRO_LANES; i++)
+            {
+                GroupBox group = (GroupBox)this.Controls.Find("chainGroup" + i, true)[0];
+
+                group.Location = new System.Drawing.Point(group.Location.X, y);
+                group.Size = new System.Drawing.Size(group.Width, group.Height + EXPAND);
+
+                Label optLabel = new Label();
+                optLabel.Name = "labelOpt" + i;
+                optLabel.Text = "Opt:";
+                optLabel.AutoSize = true;
+                optLabel.Location = new System.Drawing.Point(4, OPT_ROW_Y + 2);
+                group.Controls.Add(optLabel);
+
+                for (int slot = 1; slot <= 7; slot++)
+                {
+                    CheckBox optInput = new CheckBox();
+                    optInput.Name = "in" + slot + "mac" + i + "opt";
+                    optInput.Text = "";
+                    optInput.Location = new System.Drawing.Point(slotX[slot - 1] + 4, OPT_ROW_Y);
+                    optInput.Size = new System.Drawing.Size(40, 17);
+                    optInput.TabIndex = 500 + (i - 1) * 7 + slot;
+                    optInput.CheckedChanged += new System.EventHandler(this.onOptionalChange);
+                    group.Controls.Add(optInput);
+                }
+
+                y += group.Height + GAP;
             }
         }
 

@@ -17,6 +17,10 @@ namespace _4RTools.Model
         // this value, the chain resets to step 0 instead of wasting an iteration sending
         // a key the server will reject. Set to match the skill's actual cooldown.
         public int cooldownMs { get; set; } = 0;
+        // When true and this step is on CD, the chain skips it and advances to the next step
+        // rather than resetting to step 0. Use for skills that should fire when available
+        // but must not block the chain when cooling down (e.g., a damage-amplifier buff).
+        public bool optional { get; set; } = false;
 
         public MacroKey(Key key, int delay)
         {
@@ -193,15 +197,24 @@ namespace _4RTools.Model
                     continue;
                 }
 
-                // Per-step local cooldown: skill was sent too recently — server would reject it.
-                // Reset to skill 1 immediately instead of wasting the iteration.
+                // Per-step local cooldown: skill was sent too recently.
+                // Optional steps skip to the next step; mandatory steps reset chain to step 0.
                 if (macroKey.cooldownMs > 0)
                 {
                     DateTime lastSent = chainConfig.stepLastSentAt[step];
                     if (lastSent != DateTime.MinValue
                         && (DateTime.Now - lastSent).TotalMilliseconds < macroKey.cooldownMs)
                     {
-                        chainConfig.currentChainStep = 0;
+                        if (macroKey.optional)
+                        {
+                            int skippedNext = step + 1;
+                            chainConfig.currentChainStep = skippedNext;
+                            chainConfig.stepAttemptedAt[skippedNext] = DateTime.Now;
+                        }
+                        else
+                        {
+                            chainConfig.currentChainStep = 0;
+                        }
                         continue;
                     }
                 }
