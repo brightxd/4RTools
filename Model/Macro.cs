@@ -193,6 +193,13 @@ namespace _4RTools.Model
                 MacroKey macroKey = macro[keyName];
                 if (macroKey.key == Key.None)
                 {
+                    if (macroKey.optional)
+                    {
+                        int skippedNext = step + 1;
+                        chainConfig.currentChainStep = skippedNext;
+                        chainConfig.stepAttemptedAt[skippedNext] = DateTime.Now;
+                        continue;
+                    }
                     chainConfig.ResetChainState();
                     continue;
                 }

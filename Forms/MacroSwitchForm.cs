@@ -157,11 +157,10 @@ namespace _4RTools.Forms
             ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
 
             String cbName = cdInput.Name.Split(new[] { "cooldown" }, StringSplitOptions.None)[0];
-            if (chainConfig.macroEntries.ContainsKey(cbName))
-            {
-                chainConfig.macroEntries[cbName].cooldownMs = decimal.ToInt32(cdInput.Value);
-                ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
-            }
+            if (!chainConfig.macroEntries.ContainsKey(cbName))
+                chainConfig.macroEntries[cbName] = new MacroKey(System.Windows.Input.Key.None, 0);
+            chainConfig.macroEntries[cbName].cooldownMs = decimal.ToInt32(cdInput.Value);
+            ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
 
         private void onOptionalChange(object sender, EventArgs e)
@@ -171,11 +170,10 @@ namespace _4RTools.Forms
             ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
 
             String cbName = optInput.Name.Split(new[] { "opt" }, StringSplitOptions.None)[0];
-            if (chainConfig.macroEntries.ContainsKey(cbName))
-            {
-                chainConfig.macroEntries[cbName].optional = optInput.Checked;
-                ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
-            }
+            if (!chainConfig.macroEntries.ContainsKey(cbName))
+                chainConfig.macroEntries[cbName] = new MacroKey(System.Windows.Input.Key.None, 0);
+            chainConfig.macroEntries[cbName].optional = optInput.Checked;
+            ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
 
         private void addOptionalControls()
