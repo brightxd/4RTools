@@ -220,7 +220,7 @@ namespace _4RTools.Model
                         }
                         else
                         {
-                            chainConfig.currentChainStep = 0;
+                            chainConfig.ResetChainState();
                         }
                         continue;
                     }
