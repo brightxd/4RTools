@@ -222,13 +222,12 @@ namespace _4RTools.Model
                     chainConfig.skill2SentAt = DateTime.Now;
 
                 int nextStep = step + 1;
-                bool chainComplete = nextStep >= macro.Count
-                    || !macro.ContainsKey("in" + (nextStep + 1) + "mac" + chainConfig.id)
+                bool chainComplete = !macro.ContainsKey("in" + (nextStep + 1) + "mac" + chainConfig.id)
                     || macro["in" + (nextStep + 1) + "mac" + chainConfig.id].key == Key.None;
 
                 chainConfig.currentChainStep = chainComplete ? 0 : nextStep;
             }
-            Thread.Sleep(100);
+            Thread.Sleep(15);
             return 0;
         }
 

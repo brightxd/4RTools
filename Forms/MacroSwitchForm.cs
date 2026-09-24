@@ -43,37 +43,48 @@ namespace _4RTools.Forms
             {
                 GroupBox group = (GroupBox)this.Controls.Find("chainGroup" + id, true)[0];
                 ChainConfig chainConfig = new ChainConfig(ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs[id - 1]);
-                FormUtils.ResetForm(group);
 
-                List<string> names = new List<string>(chainConfig.macroEntries.Keys);
-                foreach (string cbName in names)
+                // Set each slot directly without firing events to avoid transient None values
+                // in macroEntries while the macro thread may be running.
+                for (int slot = 1; slot <= 7; slot++)
                 {
-                    Control[] controls = group.Controls.Find(cbName, true); // Keys
-                    if (controls.Length > 0)
+                    string cbName = "in" + slot + "mac" + id;
+                    bool hasEntry = chainConfig.macroEntries.ContainsKey(cbName);
+
+                    Control[] tb = group.Controls.Find(cbName, true);
+                    if (tb.Length > 0)
                     {
-                        TextBox textBox = (TextBox)controls[0];
-                        textBox.Text = chainConfig.macroEntries[cbName].key.ToString();
+                        TextBox textBox = (TextBox)tb[0];
+                        textBox.TextChanged -= this.onTextChange;
+                        textBox.Text = hasEntry ? chainConfig.macroEntries[cbName].key.ToString() : Key.None.ToString();
+                        textBox.TextChanged += this.onTextChange;
                     }
 
-                    Control[] d = group.Controls.Find($"{cbName}delay", true); // Delays
+                    Control[] d = group.Controls.Find($"{cbName}delay", true);
                     if (d.Length > 0)
                     {
                         NumericUpDown delayInput = (NumericUpDown)d[0];
-                        delayInput.Value = chainConfig.macroEntries[cbName].delay;
+                        delayInput.ValueChanged -= this.onDelayChange;
+                        delayInput.Value = hasEntry ? chainConfig.macroEntries[cbName].delay : 0;
+                        delayInput.ValueChanged += this.onDelayChange;
                     }
 
-                    Control[] c = group.Controls.Find($"{cbName}click", true); // Clicks
-                    if (d.Length > 0)
+                    Control[] c = group.Controls.Find($"{cbName}click", true);
+                    if (c.Length > 0)
                     {
                         CheckBox checkInput = (CheckBox)c[0];
-                        checkInput.Checked = chainConfig.macroEntries[cbName].hasClick;
+                        checkInput.CheckedChanged -= this.onCheckClickChange;
+                        checkInput.Checked = hasEntry && chainConfig.macroEntries[cbName].hasClick;
+                        checkInput.CheckedChanged += this.onCheckClickChange;
                     }
 
-                    Control[] cd = group.Controls.Find($"{cbName}cooldown", true); // Cooldowns
+                    Control[] cd = group.Controls.Find($"{cbName}cooldown", true);
                     if (cd.Length > 0)
                     {
                         NumericUpDown cdInput = (NumericUpDown)cd[0];
-                        cdInput.Value = chainConfig.macroEntries[cbName].cooldownMs;
+                        cdInput.ValueChanged -= this.onCooldownChange;
+                        cdInput.Value = hasEntry ? chainConfig.macroEntries[cbName].cooldownMs : 0;
+                        cdInput.ValueChanged += this.onCooldownChange;
                     }
                 }
             }
