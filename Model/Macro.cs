@@ -275,7 +275,7 @@ namespace _4RTools.Model
         }
 
         // Set to true and rebuild to write fire/skip events to %TEMP%\4rtools_trace.txt
-linha 238        public static bool TraceEnabled = false;
+        public static bool TraceEnabled = false;
         private static readonly string TraceFile =
             System.IO.Path.Combine(System.IO.Path.GetTempPath(), "4rtools_trace.txt");
         private static void Trace(string msg)
