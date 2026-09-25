@@ -30,6 +30,11 @@ namespace _4RTools.Model
         // Use for a buff skill that should only be cast immediately before the buffed skill
         // to avoid wasting the buff window when the main skill is not ready.
         public bool fireOnlyWithNext { get; set; } = false;
+        // Extra sleep (ms) injected after THIS step fires, before the chain advances.
+        // Use on a skill with a cast animation so the next step's key arrives only
+        // after the cast completes. Unlike the next step's delay, this pause is
+        // skipped entirely when this step is on cooldown and gets skipped.
+        public int postCastDelayMs { get; set; } = 0;
         // Keep this step pending while its local cooldown is active. This is useful
         // for the final skill in a chain: earlier setup skills must not be repeated.
         public bool waitForCooldown { get; set; } = false;
@@ -215,7 +220,7 @@ namespace _4RTools.Model
         }
 
         // Set to true and rebuild to write fire/skip events to %TEMP%\4rtools_trace.txt
-        public static bool TraceEnabled = false;
+linha 238        public static bool TraceEnabled = false;
         private static readonly string TraceFile =
             System.IO.Path.Combine(System.IO.Path.GetTempPath(), "4rtools_trace.txt");
         private static void Trace(string msg)
@@ -270,17 +275,21 @@ namespace _4RTools.Model
                 // otherwise            → reset chain to step 0
                 if (IsStepOnCooldown(chainConfig, step, macroKey, now))
                 {
+                    double cdRemMs = macroKey.cooldownMs - (now - chainConfig.stepLastSentAt[step]).TotalMilliseconds;
                     if (macroKey.waitForCooldown)
                     {
+                        Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WAIT_CD remaining={cdRemMs:F0}ms");
                         continue;
                     }
 
                     if (macroKey.optional)
                     {
+                        Trace($"chain={chainConfig.id} step={step} key={macroKey.key} CD_SKIP remaining={cdRemMs:F0}ms");
                         chainConfig.currentChainStep = step + 1;
                         continue;
                     }
 
+                    Trace($"chain={chainConfig.id} step={step} key={macroKey.key} CD_RESET remaining={cdRemMs:F0}ms");
                     chainConfig.ResetChainState();
                     continue;
                 }
@@ -328,6 +337,9 @@ namespace _4RTools.Model
                 // Set stepLastSentAt to Now + castMs so the CD guard clears only after
                 // castMs + cooldownMs from key press — matching when the game's CD actually starts.
                 chainConfig.stepLastSentAt[step] = DateTime.UtcNow.AddMilliseconds(macroKey.castMs);
+
+                if (macroKey.postCastDelayMs > 0)
+                    Thread.Sleep(macroKey.postCastDelayMs);
 
                 int nextStep = step + 1;
                 bool chainComplete = !macro.ContainsKey("in" + (nextStep + 1) + "mac" + chainConfig.id)

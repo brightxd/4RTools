@@ -145,6 +145,15 @@ namespace _4RTools.Forms
                         presentInput.Checked = hasEntry && chainConfig.macroEntries[cbName].conditionStatusPresent;
                         presentInput.CheckedChanged += this.onConditionPresentChange;
                     }
+
+                    Control[] postCast = group.Controls.Find($"{cbName}postcast", true);
+                    if (postCast.Length > 0)
+                    {
+                        NumericUpDown postCastInput = (NumericUpDown)postCast[0];
+                        postCastInput.ValueChanged -= this.onPostCastChange;
+                        postCastInput.Value = hasEntry ? chainConfig.macroEntries[cbName].postCastDelayMs : 0;
+                        postCastInput.ValueChanged += this.onPostCastChange;
+                    }
                 }
 
                 // Loop-back: 0 = disabled, 1-7 = loop to that slot (1-indexed)
@@ -189,6 +198,7 @@ namespace _4RTools.Forms
                 updatedMacroKey.optional = existingOptional;
                 updatedMacroKey.fireOnlyWithNext = existingFireOnlyWithNext;
                 updatedMacroKey.waitForCooldown = existingMacroKey.waitForCooldown;
+                updatedMacroKey.postCastDelayMs = existingMacroKey.postCastDelayMs;
                 updatedMacroKey.conditionStatusId = existingMacroKey.conditionStatusId;
                 updatedMacroKey.conditionStatusPresent = existingMacroKey.conditionStatusPresent;
             }
@@ -294,6 +304,16 @@ namespace _4RTools.Forms
             ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
             string cbName = waitInput.Name.Split(new[] { "waitcd" }, StringSplitOptions.None)[0];
             GetOrCreateMacroKey(chainConfig, cbName).waitForCooldown = waitInput.Checked;
+            ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
+        }
+
+        private void onPostCastChange(object sender, EventArgs e)
+        {
+            NumericUpDown postCastInput = (NumericUpDown)sender;
+            int chainID = Int16.Parse(postCastInput.Parent.Name.Split(new[] { "chainGroup" }, StringSplitOptions.None)[1]);
+            ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
+            string cbName = postCastInput.Name.Split(new[] { "postcast" }, StringSplitOptions.None)[0];
+            GetOrCreateMacroKey(chainConfig, cbName).postCastDelayMs = decimal.ToInt32(postCastInput.Value);
             ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
 
@@ -509,7 +529,8 @@ namespace _4RTools.Forms
             const int WAIT_ROW_Y = 205;
             const int STATUS_ROW_Y = 227;
             const int PRESENT_ROW_Y = 249;
-            const int EXPAND = 60;
+            const int POST_CAST_ROW_Y = 271;
+            const int EXPAND = 80;
             const int GAP = 4;
             int[] slotX = { 66, 135, 204, 273, 342, 411, 480 };
 
@@ -541,6 +562,13 @@ namespace _4RTools.Forms
                 presentLabel.Location = new System.Drawing.Point(4, PRESENT_ROW_Y + 2);
                 group.Controls.Add(presentLabel);
 
+                Label postCastLabel = new Label();
+                postCastLabel.Name = "labelPostCast" + i;
+                postCastLabel.Text = "Post(ms):";
+                postCastLabel.AutoSize = true;
+                postCastLabel.Location = new System.Drawing.Point(4, POST_CAST_ROW_Y + 2);
+                group.Controls.Add(postCastLabel);
+
                 for (int slot = 1; slot <= 7; slot++)
                 {
                     CheckBox waitInput = new CheckBox();
@@ -567,6 +595,14 @@ namespace _4RTools.Forms
                     presentInput.Checked = true;
                     presentInput.CheckedChanged += new System.EventHandler(this.onConditionPresentChange);
                     group.Controls.Add(presentInput);
+
+                    NumericUpDown postCastInput = new NumericUpDown();
+                    postCastInput.Name = "in" + slot + "mac" + i + "postcast";
+                    postCastInput.Location = new System.Drawing.Point(slotX[slot - 1], POST_CAST_ROW_Y);
+                    postCastInput.Size = new System.Drawing.Size(47, 20);
+                    postCastInput.Maximum = 5000;
+                    postCastInput.ValueChanged += new System.EventHandler(this.onPostCastChange);
+                    group.Controls.Add(postCastInput);
                 }
 
                 y += group.Height + GAP;
