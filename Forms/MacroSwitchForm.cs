@@ -24,6 +24,8 @@ namespace _4RTools.Forms
             addWNextControls();
             addLoopBackControls();
             addConditionControls();
+            addMemoryCdControls();
+            anchorGroups();
         }
 
         public void Update(ISubject subject)
@@ -154,6 +156,15 @@ namespace _4RTools.Forms
                         postCastInput.Value = hasEntry ? chainConfig.macroEntries[cbName].postCastDelayMs : 0;
                         postCastInput.ValueChanged += this.onPostCastChange;
                     }
+
+                    Control[] skillIdCtrl = group.Controls.Find($"{cbName}skillid", true);
+                    if (skillIdCtrl.Length > 0)
+                    {
+                        TextBox skillIdInput = (TextBox)skillIdCtrl[0];
+                        skillIdInput.TextChanged -= this.onSkillIdChange;
+                        skillIdInput.Text = hasEntry ? (chainConfig.macroEntries[cbName].skillId ?? "") : "";
+                        skillIdInput.TextChanged += this.onSkillIdChange;
+                    }
                 }
 
                 // Loop-back: 0 = disabled, 1-7 = loop to that slot (1-indexed)
@@ -201,6 +212,8 @@ namespace _4RTools.Forms
                 updatedMacroKey.postCastDelayMs = existingMacroKey.postCastDelayMs;
                 updatedMacroKey.conditionStatusId = existingMacroKey.conditionStatusId;
                 updatedMacroKey.conditionStatusPresent = existingMacroKey.conditionStatusPresent;
+                updatedMacroKey.skillId = existingMacroKey.skillId;
+                updatedMacroKey.limboGuardMs = existingMacroKey.limboGuardMs;
             }
             chainConfig.macroEntries[textBox.Name] = updatedMacroKey;
 
@@ -607,6 +620,109 @@ namespace _4RTools.Forms
 
                 y += group.Height + GAP;
             }
+        }
+
+        private void addMemoryCdControls()
+        {
+            const int SKILL_ROW_Y = 293;
+            const int EXPAND     = 22;
+            const int GAP        = 4;
+            int[] slotX = { 66, 135, 204, 273, 342, 411, 480 };
+
+            int y = 12;
+            for (int i = 1; i <= TOTAL_MACRO_LANES; i++)
+            {
+                GroupBox group = (GroupBox)this.Controls.Find("chainGroup" + i, true)[0];
+                group.Location = new System.Drawing.Point(group.Location.X, y);
+                group.Size = new System.Drawing.Size(group.Width, group.Height + EXPAND);
+
+                Label lbl = new Label { Name = "labelSkillId" + i, Text = "Skill ID:", AutoSize = true };
+                lbl.Location = new System.Drawing.Point(4, SKILL_ROW_Y + 2);
+                group.Controls.Add(lbl);
+
+                for (int slot = 1; slot <= 7; slot++)
+                {
+                    TextBox tb = new TextBox();
+                    tb.Name     = "in" + slot + "mac" + i + "skillid";
+                    tb.Location = new System.Drawing.Point(slotX[slot - 1], SKILL_ROW_Y);
+                    tb.Size     = new System.Drawing.Size(63, 20);
+                    tb.TextChanged += new System.EventHandler(this.onSkillIdChange);
+                    group.Controls.Add(tb);
+                }
+
+                y += group.Height + GAP;
+            }
+        }
+
+        // Anchor all chain groups to stretch with the form width.
+        private void anchorGroups()
+        {
+            for (int i = 1; i <= TOTAL_MACRO_LANES; i++)
+            {
+                var found = this.Controls.Find("chainGroup" + i, true);
+                if (found.Length > 0)
+                    found[0].Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            }
+        }
+
+        // Suffixes with no extra X offset (inputs: TextBox / NumericUpDown).
+        private static readonly string[] _slotSuffixesDirect  =
+            { "", "delay", "cooldown", "cast", "condstatus", "postcast", "skillid" };
+        // Suffixes that carry +4 px (CheckBox controls that need a small left indent).
+        private static readonly string[] _slotSuffixesOffset4 =
+            { "click", "opt", "wnext", "waitcd", "condpresent" };
+
+        // Redistributes the 7 slot columns evenly across the current group width.
+        private void RelayoutGroups()
+        {
+            const int LABEL_COL  = 64;
+            const int RIGHT_PAD  = 8;
+            const int MIN_STRIDE = 69;
+
+            for (int i = 1; i <= TOTAL_MACRO_LANES; i++)
+            {
+                var found = this.Controls.Find("chainGroup" + i, true);
+                if (found.Length == 0) continue;
+                GroupBox group = (GroupBox)found[0];
+
+                int available = group.Width - LABEL_COL - RIGHT_PAD;
+                int stride    = Math.Max(MIN_STRIDE, available / 6);
+
+                for (int slot = 1; slot <= 7; slot++)
+                {
+                    int x = LABEL_COL + (slot - 1) * stride;
+
+                    foreach (string suffix in _slotSuffixesDirect)
+                    {
+                        var ctrls = group.Controls.Find("in" + slot + "mac" + i + suffix, true);
+                        if (ctrls.Length > 0)
+                            ctrls[0].Location = new System.Drawing.Point(x, ctrls[0].Location.Y);
+                    }
+                    foreach (string suffix in _slotSuffixesOffset4)
+                    {
+                        var ctrls = group.Controls.Find("in" + slot + "mac" + i + suffix, true);
+                        if (ctrls.Length > 0)
+                            ctrls[0].Location = new System.Drawing.Point(x + 4, ctrls[0].Location.Y);
+                    }
+                }
+            }
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (IsHandleCreated) RelayoutGroups();
+        }
+
+        private void onSkillIdChange(object sender, EventArgs e)
+        {
+            TextBox tb = (TextBox)sender;
+            int chainID = Int16.Parse(tb.Parent.Name.Split(new[] { "chainGroup" }, StringSplitOptions.None)[1]);
+            string cbName = tb.Name.Split(new[] { "skillid" }, StringSplitOptions.None)[0];
+            ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(c => c.id == chainID);
+            if (chainConfig == null) return;
+            GetOrCreateMacroKey(chainConfig, cbName).skillId = string.IsNullOrWhiteSpace(tb.Text) ? null : tb.Text.Trim();
+            ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
 
         private void updateUi()
