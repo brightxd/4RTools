@@ -148,9 +148,9 @@ namespace _4RTools.Forms
             this.panelFooter.Controls.Add(this.lbPowered);
             this.panelFooter.Controls.Add(this.lblLinkDiscord);
             this.panelFooter.Controls.Add(this.panelDiscImage);
-            this.panelFooter.Location = new System.Drawing.Point(-3, 707);
+            this.panelFooter.Location = new System.Drawing.Point(-3, 857);
             this.panelFooter.Name = "panelFooter";
-            this.panelFooter.Size = new System.Drawing.Size(920, 43);
+            this.panelFooter.Size = new System.Drawing.Size(1300, 43);
             this.panelFooter.TabIndex = 16;
             this.panelFooter.Anchor = ((System.Windows.Forms.AnchorStyles)(
                 System.Windows.Forms.AnchorStyles.Bottom
@@ -334,7 +334,7 @@ namespace _4RTools.Forms
             this.atkDefMode.Location = new System.Drawing.Point(15, 274);
             this.atkDefMode.Name = "atkDefMode";
             this.atkDefMode.SelectedIndex = 0;
-            this.atkDefMode.Size = new System.Drawing.Size(870, 428);
+            this.atkDefMode.Size = new System.Drawing.Size(1250, 578);
             this.atkDefMode.TabIndex = 4;
             this.atkDefMode.Anchor = ((System.Windows.Forms.AnchorStyles)(
                 System.Windows.Forms.AnchorStyles.Top
@@ -386,7 +386,7 @@ namespace _4RTools.Forms
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.White;
-            this.ClientSize = new System.Drawing.Size(900, 750);
+            this.ClientSize = new System.Drawing.Size(1280, 900);
             this.Controls.Add(this.OnOffPanel);
             this.Controls.Add(this.characterName);
             this.Controls.Add(this.lblCharacterName);
@@ -404,7 +404,7 @@ namespace _4RTools.Forms
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.MaximizeBox = true;
-            this.MinimumSize = new System.Drawing.Size(640, 680);
+            this.MinimumSize = new System.Drawing.Size(800, 750);
             this.Name = "Container";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "4ROTools - Versão Beta";
