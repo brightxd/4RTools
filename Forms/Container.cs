@@ -71,12 +71,15 @@ namespace _4RTools.Forms
         {
             Client client = new Client(this.processCB.SelectedItem.ToString());
             ClientSingleton.Instance(client);
+            if (client.process != null)
+                CdCalibrator.TryAttach(client.process.Id);
             subject.Notify(new Utils.Message(Utils.MessageCode.PROCESS_CHANGED, null));
         }
 
         private void Container_Load(object sender, EventArgs e)
         {
             ProfileSingleton.Create("Default");
+            CdCalibrator.Load();
             this.refreshProcessList();
             this.refreshProfileList();
             this.profileCB.SelectedItem = "Default";

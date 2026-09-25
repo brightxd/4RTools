@@ -8,6 +8,8 @@ using System.Windows.Forms;
 
 namespace _4RTools.Model
 {
+    public enum SkillCdState { Idle, Limbo, Casting }
+
     public class MacroKey
     {
         public Key key { get; set; }
@@ -42,6 +44,11 @@ namespace _4RTools.Model
         // the status to be present (or absent when conditionStatusPresent is false).
         public int conditionStatusId { get; set; } = -1;
         public bool conditionStatusPresent { get; set; } = true;
+        // When set, the step uses memory-backed CD tracking instead of the local timer.
+        // Value must match a key in SkillCdMap.json (populated by CdCalibrator).
+        public string skillId { get; set; } = null;
+        // Extra guard on top of castMs during the Limbo window (ms). Defaults to 150 ms (≈ typical RTT).
+        public int limboGuardMs { get; set; } = 0;
 
         public MacroKey(Key key, int delay)
         {
@@ -65,6 +72,9 @@ namespace _4RTools.Model
         [JsonIgnore] public int currentChainStep { get; set; } = 0;
         // Per-step last-sent timestamps. Preserved across chain resets for CD tracking.
         [JsonIgnore] public DateTime[] stepLastSentAt = new DateTime[7];
+        // State machine state and limbo entry time for memory-backed CD tracking.
+        [JsonIgnore] public SkillCdState[] stepCdState  = new SkillCdState[7];
+        [JsonIgnore] public DateTime[]     stepLimboAt   = new DateTime[7];
         // When >= 0, chain loops to this step (0-indexed) after the last step fires instead of
         // resetting to step 0. Enables cycling of late combo skills without re-triggering setup.
         public int comboLoopBackStep { get; set; } = -1;
@@ -169,12 +179,57 @@ namespace _4RTools.Model
 
         private static bool IsStepOnCooldown(ChainConfig chainConfig, int step, MacroKey macroKey, DateTime now)
         {
-            if (macroKey.cooldownMs <= 0 || step < 0 || step >= chainConfig.stepLastSentAt.Length)
-                return false;
+            if (step < 0 || step >= chainConfig.stepLastSentAt.Length) return false;
 
-            DateTime lastSent = chainConfig.stepLastSentAt[step];
-            return lastSent != DateTime.MinValue
-                && (now - lastSent).TotalMilliseconds < macroKey.cooldownMs;
+            IntPtr cdAddr = string.IsNullOrEmpty(macroKey.skillId)
+                ? IntPtr.Zero
+                : CdCalibrator.GetAddress(macroKey.skillId);
+
+            if (cdAddr == IntPtr.Zero)
+            {
+                // Legacy: local elapsed-time guard
+                if (macroKey.cooldownMs <= 0) return false;
+                DateTime lastSent = chainConfig.stepLastSentAt[step];
+                return lastSent != DateTime.MinValue
+                    && (now - lastSent).TotalMilliseconds < macroKey.cooldownMs;
+            }
+
+            // Memory-backed hybrid state machine
+            switch (chainConfig.stepCdState[step])
+            {
+                case SkillCdState.Limbo:
+                {
+                    float memCd = CdCalibrator.ReadCd(macroKey.skillId);
+                    if (memCd > 0.05f)
+                    {
+                        // Server confirmed the cast — CD is now live in memory
+                        chainConfig.stepCdState[step] = SkillCdState.Casting;
+                        return true;
+                    }
+                    // Still in the RTT + cast-animation window; block the step
+                    int guardMs = macroKey.castMs + (macroKey.limboGuardMs > 0 ? macroKey.limboGuardMs : 150);
+                    if ((now - chainConfig.stepLimboAt[step]).TotalMilliseconds >= guardMs)
+                    {
+                        // Guard expired and memory never showed a CD — server likely rejected
+                        // the cast. Fall back to Idle so the chain can retry cleanly.
+                        chainConfig.stepCdState[step] = SkillCdState.Idle;
+                        return false;
+                    }
+                    return true;
+                }
+                case SkillCdState.Casting:
+                {
+                    float memCd = CdCalibrator.ReadCd(macroKey.skillId);
+                    if (memCd <= 0.05f)
+                    {
+                        chainConfig.stepCdState[step] = SkillCdState.Idle;
+                        return false;
+                    }
+                    return true;
+                }
+                default: // Idle
+                    return false;
+            }
         }
 
         private static bool IsConditionSatisfied(
@@ -275,7 +330,11 @@ linha 238        public static bool TraceEnabled = false;
                 // otherwise            → reset chain to step 0
                 if (IsStepOnCooldown(chainConfig, step, macroKey, now))
                 {
-                    double cdRemMs = macroKey.cooldownMs - (now - chainConfig.stepLastSentAt[step]).TotalMilliseconds;
+                    bool memPath = !string.IsNullOrEmpty(macroKey.skillId)
+                        && CdCalibrator.GetAddress(macroKey.skillId) != IntPtr.Zero;
+                    double cdRemMs = memPath
+                        ? CdCalibrator.ReadCd(macroKey.skillId) * 1000.0
+                        : macroKey.cooldownMs - (now - chainConfig.stepLastSentAt[step]).TotalMilliseconds;
                     if (macroKey.waitForCooldown)
                     {
                         Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WAIT_CD remaining={cdRemMs:F0}ms");
@@ -334,9 +393,22 @@ linha 238        public static bool TraceEnabled = false;
 
                 SendMacroKey(roClient, macroKey, chainConfig);
                 Trace($"chain={chainConfig.id} step={step} key={macroKey.key} FIRE");
-                // Set stepLastSentAt to Now + castMs so the CD guard clears only after
-                // castMs + cooldownMs from key press — matching when the game's CD actually starts.
-                chainConfig.stepLastSentAt[step] = DateTime.UtcNow.AddMilliseconds(macroKey.castMs);
+                // Transition to Limbo if we have a calibrated memory address for this skill;
+                // otherwise fall back to the local timestamp guard.
+                bool usingMemoryCd = !string.IsNullOrEmpty(macroKey.skillId)
+                    && CdCalibrator.GetAddress(macroKey.skillId) != IntPtr.Zero;
+
+                if (usingMemoryCd)
+                {
+                    chainConfig.stepCdState[step] = SkillCdState.Limbo;
+                    chainConfig.stepLimboAt[step]  = DateTime.UtcNow;
+                }
+                else
+                {
+                    // Set stepLastSentAt to Now + castMs so the CD guard clears only after
+                    // castMs + cooldownMs from key press — matching when the game's CD actually starts.
+                    chainConfig.stepLastSentAt[step] = DateTime.UtcNow.AddMilliseconds(macroKey.castMs);
+                }
 
                 if (macroKey.postCastDelayMs > 0)
                     Thread.Sleep(macroKey.postCastDelayMs);

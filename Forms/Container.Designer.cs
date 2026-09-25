@@ -141,17 +141,21 @@ namespace _4RTools.Forms
             this.profileCB.Size = new System.Drawing.Size(181, 21);
             this.profileCB.TabIndex = 14;
             this.profileCB.SelectedIndexChanged += new System.EventHandler(this.profileCB_SelectedIndexChanged);
-            // 
+            //
             // panelFooter
-            // 
+            //
             this.panelFooter.BackColor = System.Drawing.Color.WhiteSmoke;
             this.panelFooter.Controls.Add(this.lbPowered);
             this.panelFooter.Controls.Add(this.lblLinkDiscord);
             this.panelFooter.Controls.Add(this.panelDiscImage);
-            this.panelFooter.Location = new System.Drawing.Point(-3, 580);
+            this.panelFooter.Location = new System.Drawing.Point(-3, 707);
             this.panelFooter.Name = "panelFooter";
-            this.panelFooter.Size = new System.Drawing.Size(903, 43);
+            this.panelFooter.Size = new System.Drawing.Size(920, 43);
             this.panelFooter.TabIndex = 16;
+            this.panelFooter.Anchor = ((System.Windows.Forms.AnchorStyles)(
+                System.Windows.Forms.AnchorStyles.Bottom
+                | System.Windows.Forms.AnchorStyles.Left
+                | System.Windows.Forms.AnchorStyles.Right));
             // 
             // lbPowered
             // 
@@ -162,14 +166,18 @@ namespace _4RTools.Forms
             this.lbPowered.Size = new System.Drawing.Size(181, 13);
             this.lbPowered.TabIndex = 0;
             this.lbPowered.Text = "Powered by AuTHEntiC and MarkiinG";
-            // 
+            //
             // panel4
-            // 
+            //
             this.panel4.BackColor = System.Drawing.Color.Silver;
             this.panel4.Location = new System.Drawing.Point(16, 66);
             this.panel4.Name = "panel4";
             this.panel4.Size = new System.Drawing.Size(568, 1);
             this.panel4.TabIndex = 17;
+            this.panel4.Anchor = ((System.Windows.Forms.AnchorStyles)(
+                System.Windows.Forms.AnchorStyles.Top
+                | System.Windows.Forms.AnchorStyles.Left
+                | System.Windows.Forms.AnchorStyles.Right));
             // 
             // label1
             // 
@@ -310,9 +318,9 @@ namespace _4RTools.Forms
             this.tabSkillTimer.TabIndex = 5;
             this.tabSkillTimer.Text = "Skill timers";
             this.tabSkillTimer.UseVisualStyleBackColor = true;
-            // 
+            //
             // atkDefMode
-            // 
+            //
             this.atkDefMode.Controls.Add(this.tabPageSpammer);
             this.atkDefMode.Controls.Add(this.tabDebuffRecovery);
             this.atkDefMode.Controls.Add(this.tabPageAutobuffSkill);
@@ -326,8 +334,13 @@ namespace _4RTools.Forms
             this.atkDefMode.Location = new System.Drawing.Point(15, 274);
             this.atkDefMode.Name = "atkDefMode";
             this.atkDefMode.SelectedIndex = 0;
-            this.atkDefMode.Size = new System.Drawing.Size(571, 300);
+            this.atkDefMode.Size = new System.Drawing.Size(870, 428);
             this.atkDefMode.TabIndex = 4;
+            this.atkDefMode.Anchor = ((System.Windows.Forms.AnchorStyles)(
+                System.Windows.Forms.AnchorStyles.Top
+                | System.Windows.Forms.AnchorStyles.Bottom
+                | System.Windows.Forms.AnchorStyles.Left
+                | System.Windows.Forms.AnchorStyles.Right));
             // 
             // tabDebuffRecovery
             // 
@@ -373,7 +386,7 @@ namespace _4RTools.Forms
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.White;
-            this.ClientSize = new System.Drawing.Size(609, 624);
+            this.ClientSize = new System.Drawing.Size(900, 750);
             this.Controls.Add(this.OnOffPanel);
             this.Controls.Add(this.characterName);
             this.Controls.Add(this.lblCharacterName);
@@ -388,9 +401,10 @@ namespace _4RTools.Forms
             this.Controls.Add(this.btnRefresh);
             this.Controls.Add(this.lblProcessName);
             this.Controls.Add(this.processCB);
-            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
-            this.MaximizeBox = false;
+            this.MaximizeBox = true;
+            this.MinimumSize = new System.Drawing.Size(640, 680);
             this.Name = "Container";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "4ROTools - Versão Beta";
