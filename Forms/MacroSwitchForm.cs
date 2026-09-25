@@ -20,6 +20,8 @@ namespace _4RTools.Forms
             configureMacroLanes();
             addCooldownControls();
             addOptionalControls();
+            addWNextControls();
+            addLoopBackControls();
         }
 
         public void Update(ISubject subject)
@@ -96,6 +98,25 @@ namespace _4RTools.Forms
                         optInput.Checked = hasEntry && chainConfig.macroEntries[cbName].optional;
                         optInput.CheckedChanged += this.onOptionalChange;
                     }
+
+                    Control[] wn = group.Controls.Find($"{cbName}wnext", true);
+                    if (wn.Length > 0)
+                    {
+                        CheckBox wnInput = (CheckBox)wn[0];
+                        wnInput.CheckedChanged -= this.onWNextChange;
+                        wnInput.Checked = hasEntry && chainConfig.macroEntries[cbName].fireOnlyWithNext;
+                        wnInput.CheckedChanged += this.onWNextChange;
+                    }
+                }
+
+                // Loop-back: 0 = disabled, 1-7 = loop to that slot (1-indexed)
+                Control[] lb = group.Controls.Find($"chainLoopFrom{id}", true);
+                if (lb.Length > 0)
+                {
+                    NumericUpDown lbInput = (NumericUpDown)lb[0];
+                    lbInput.ValueChanged -= this.onLoopBackChange;
+                    lbInput.Value = chainConfig.comboLoopBackStep < 0 ? 0 : chainConfig.comboLoopBackStep + 1;
+                    lbInput.ValueChanged += this.onLoopBackChange;
                 }
             }
             catch { };
@@ -116,9 +137,12 @@ namespace _4RTools.Forms
                 : 0;
             bool existingOptional = chainConfig.macroEntries.ContainsKey(textBox.Name)
                 && chainConfig.macroEntries[textBox.Name].optional;
+            bool existingFireOnlyWithNext = chainConfig.macroEntries.ContainsKey(textBox.Name)
+                && chainConfig.macroEntries[textBox.Name].fireOnlyWithNext;
             chainConfig.macroEntries[textBox.Name] = new MacroKey(key, decimal.ToInt16(delayInput.Value));
             chainConfig.macroEntries[textBox.Name].cooldownMs = existingCooldown;
             chainConfig.macroEntries[textBox.Name].optional = existingOptional;
+            chainConfig.macroEntries[textBox.Name].fireOnlyWithNext = existingFireOnlyWithNext;
 
             bool isFirstInput = Regex.IsMatch(textBox.Name, $"in1mac{chainID}");
             if (isFirstInput) { chainConfig.trigger = key; }
@@ -173,6 +197,30 @@ namespace _4RTools.Forms
             if (!chainConfig.macroEntries.ContainsKey(cbName))
                 chainConfig.macroEntries[cbName] = new MacroKey(System.Windows.Input.Key.None, 0);
             chainConfig.macroEntries[cbName].optional = optInput.Checked;
+            ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
+        }
+
+        private void onLoopBackChange(object sender, EventArgs e)
+        {
+            NumericUpDown lbInput = (NumericUpDown)sender;
+            int chainID = Int16.Parse(lbInput.Parent.Name.Split(new[] { "chainGroup" }, StringSplitOptions.None)[1]);
+            ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
+
+            int slotValue = (int)lbInput.Value;
+            chainConfig.comboLoopBackStep = slotValue == 0 ? -1 : slotValue - 1;
+            ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
+        }
+
+        private void onWNextChange(object sender, EventArgs e)
+        {
+            CheckBox wnInput = (CheckBox)sender;
+            int chainID = Int16.Parse(wnInput.Parent.Name.Split(new[] { "chainGroup" }, StringSplitOptions.None)[1]);
+            ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
+
+            String cbName = wnInput.Name.Split(new[] { "wnext" }, StringSplitOptions.None)[0];
+            if (!chainConfig.macroEntries.ContainsKey(cbName))
+                chainConfig.macroEntries[cbName] = new MacroKey(System.Windows.Input.Key.None, 0);
+            chainConfig.macroEntries[cbName].fireOnlyWithNext = wnInput.Checked;
             ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
 
@@ -247,6 +295,79 @@ namespace _4RTools.Forms
                     cdInput.ValueChanged += new System.EventHandler(this.onCooldownChange);
                     group.Controls.Add(cdInput);
                 }
+
+                y += group.Height + GAP;
+            }
+        }
+
+        private void addWNextControls()
+        {
+            const int WNEXT_ROW_Y = 139;
+            const int EXPAND = 20;
+            const int GAP = 4;
+            int[] slotX = { 66, 135, 204, 273, 342, 411, 480 };
+
+            int y = 12;
+            for (int i = 1; i <= TOTAL_MACRO_LANES; i++)
+            {
+                GroupBox group = (GroupBox)this.Controls.Find("chainGroup" + i, true)[0];
+
+                group.Location = new System.Drawing.Point(group.Location.X, y);
+                group.Size = new System.Drawing.Size(group.Width, group.Height + EXPAND);
+
+                Label wnLabel = new Label();
+                wnLabel.Name = "labelWNext" + i;
+                wnLabel.Text = "W/Next:";
+                wnLabel.AutoSize = true;
+                wnLabel.Location = new System.Drawing.Point(4, WNEXT_ROW_Y + 2);
+                group.Controls.Add(wnLabel);
+
+                for (int slot = 1; slot <= 7; slot++)
+                {
+                    CheckBox wnInput = new CheckBox();
+                    wnInput.Name = "in" + slot + "mac" + i + "wnext";
+                    wnInput.Text = "";
+                    wnInput.Location = new System.Drawing.Point(slotX[slot - 1] + 4, WNEXT_ROW_Y);
+                    wnInput.Size = new System.Drawing.Size(40, 17);
+                    wnInput.TabIndex = 700 + (i - 1) * 7 + slot;
+                    wnInput.CheckedChanged += new System.EventHandler(this.onWNextChange);
+                    group.Controls.Add(wnInput);
+                }
+
+                y += group.Height + GAP;
+            }
+        }
+
+        private void addLoopBackControls()
+        {
+            const int LOOP_ROW_Y = 161;
+            const int EXPAND = 20;
+            const int GAP = 4;
+
+            int y = 12;
+            for (int i = 1; i <= TOTAL_MACRO_LANES; i++)
+            {
+                GroupBox group = (GroupBox)this.Controls.Find("chainGroup" + i, true)[0];
+
+                group.Location = new System.Drawing.Point(group.Location.X, y);
+                group.Size = new System.Drawing.Size(group.Width, group.Height + EXPAND);
+
+                Label loopLabel = new Label();
+                loopLabel.Name = "labelLoop" + i;
+                loopLabel.Text = "Loop from slot:";
+                loopLabel.AutoSize = true;
+                loopLabel.Location = new System.Drawing.Point(4, LOOP_ROW_Y + 2);
+                group.Controls.Add(loopLabel);
+
+                NumericUpDown lbInput = new NumericUpDown();
+                lbInput.Name = "chainLoopFrom" + i;
+                lbInput.Location = new System.Drawing.Point(100, LOOP_ROW_Y);
+                lbInput.Size = new System.Drawing.Size(47, 20);
+                lbInput.Minimum = 0;
+                lbInput.Maximum = 7;
+                lbInput.TabIndex = 600 + i;
+                lbInput.ValueChanged += new System.EventHandler(this.onLoopBackChange);
+                group.Controls.Add(lbInput);
 
                 y += group.Height + GAP;
             }

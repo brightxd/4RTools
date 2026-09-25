@@ -21,6 +21,10 @@ namespace _4RTools.Model
         // rather than resetting to step 0. Use for skills that should fire when available
         // but must not block the chain when cooling down (e.g., a damage-amplifier buff).
         public bool optional { get; set; } = false;
+        // When true, this step is skipped (like optional) if the NEXT step is on CD.
+        // Use for a buff skill that should only be cast immediately before the buffed skill
+        // to avoid wasting the buff window when the main skill is not ready.
+        public bool fireOnlyWithNext { get; set; } = false;
 
         public MacroKey(Key key, int delay)
         {
@@ -42,16 +46,11 @@ namespace _4RTools.Model
 
         // Runtime state — not persisted in profile
         [JsonIgnore] public int currentChainStep { get; set; } = 0;
-        [JsonIgnore] public DateTime skill2SentAt { get; set; } = DateTime.MinValue;
         // Per-step last-sent timestamps. Preserved across chain resets for CD tracking.
         [JsonIgnore] public DateTime[] stepLastSentAt = new DateTime[7];
-        // Per-step "when did we arrive here in the current chain run" timestamps.
-        // Reset in ResetChainState() so stale values from previous runs never trigger spurious timeouts.
-        [JsonIgnore] public DateTime[] stepAttemptedAt = new DateTime[7];
-        // How long (ms) to wait at a step before treating it as failed and resetting to step 0.
-        [JsonIgnore] public int stepTimeoutMs { get; set; } = 300;
-        // Window (ms) after skill 2 during which skills 3/4 are sent (server combo state duration).
-        [JsonIgnore] public int comboWindowMs { get; set; } = 3000;
+        // When >= 0, chain loops to this step (0-indexed) after the last step fires instead of
+        // resetting to step 0. Enables cycling of late combo skills without re-triggering setup.
+        public int comboLoopBackStep { get; set; } = -1;
 
         public ChainConfig() { }
         public ChainConfig(int id)
@@ -69,6 +68,7 @@ namespace _4RTools.Model
             this.instrumentKey = macro.instrumentKey;
             this.infinityLoop = macro.infinityLoop;
             this.macroEntries = new Dictionary<string, MacroKey>(macro.macroEntries);
+            this.comboLoopBackStep = macro.comboLoopBackStep;
         }
         public ChainConfig(int id, Key trigger)
         {
@@ -80,7 +80,6 @@ namespace _4RTools.Model
         public void ResetChainState()
         {
             currentChainStep = 0;
-            stepAttemptedAt = new DateTime[7];
             // stepLastSentAt preserved — CD tracking must survive chain resets.
         }
     }
@@ -157,9 +156,7 @@ namespace _4RTools.Model
             {
                 if (chainConfig.trigger == Key.None) continue;
 
-                bool triggerHeld = Keyboard.IsKeyDown(chainConfig.trigger);
-
-                if (!triggerHeld)
+                if (!Keyboard.IsKeyDown(chainConfig.trigger))
                 {
                     chainConfig.ResetChainState();
                     continue;
@@ -167,21 +164,6 @@ namespace _4RTools.Model
 
                 Dictionary<string, MacroKey> macro = chainConfig.macroEntries;
                 int step = chainConfig.currentChainStep;
-
-                // Step timeout: if we've been stuck at this step too long, the skill probably
-                // failed server-side. Reset to step 0 and try again.
-                // Uses stepAttemptedAt (reset per chain run) — NOT stepLastSentAt (which is
-                // never reset and would trigger spurious timeouts on re-press after release).
-                if (chainConfig.stepAttemptedAt[step] == DateTime.MinValue)
-                    chainConfig.stepAttemptedAt[step] = DateTime.Now;
-
-                bool stepTimedOut = (DateTime.Now - chainConfig.stepAttemptedAt[step]).TotalMilliseconds > chainConfig.stepTimeoutMs;
-
-                if (stepTimedOut)
-                {
-                    chainConfig.ResetChainState();
-                    step = 0;
-                }
 
                 string keyName = "in" + (step + 1) + "mac" + chainConfig.id;
                 if (!macro.ContainsKey(keyName))
@@ -191,21 +173,19 @@ namespace _4RTools.Model
                 }
 
                 MacroKey macroKey = macro[keyName];
+
                 if (macroKey.key == Key.None)
                 {
                     if (macroKey.optional)
-                    {
-                        int skippedNext = step + 1;
-                        chainConfig.currentChainStep = skippedNext;
-                        chainConfig.stepAttemptedAt[skippedNext] = DateTime.Now;
-                        continue;
-                    }
-                    chainConfig.ResetChainState();
+                        chainConfig.currentChainStep = step + 1;
+                    else
+                        chainConfig.ResetChainState();
                     continue;
                 }
 
-                // Per-step local cooldown: skill was sent too recently.
-                // Optional steps skip to the next step; mandatory steps reset chain to step 0.
+                // Per-step local cooldown guard.
+                // optional=true  → skip to next step (chain keeps moving)
+                // optional=false → reset chain to step 0
                 if (macroKey.cooldownMs > 0)
                 {
                     DateTime lastSent = chainConfig.stepLastSentAt[step];
@@ -213,38 +193,37 @@ namespace _4RTools.Model
                         && (DateTime.Now - lastSent).TotalMilliseconds < macroKey.cooldownMs)
                     {
                         if (macroKey.optional)
-                        {
-                            int skippedNext = step + 1;
-                            chainConfig.currentChainStep = skippedNext;
-                            chainConfig.stepAttemptedAt[skippedNext] = DateTime.Now;
-                        }
+                            chainConfig.currentChainStep = step + 1;
                         else
-                        {
                             chainConfig.ResetChainState();
-                        }
                         continue;
                     }
                 }
 
-                // Skills 3+ (step >= 2) require skill 2 to have been sent within the combo window.
-                // Guards skill 4 from being sent outside combo-ready state.
-                if (step >= 2)
+                // fireOnlyWithNext: skip (like optional) when the next step is on CD.
+                if (macroKey.fireOnlyWithNext)
                 {
-                    bool withinComboWindow = chainConfig.skill2SentAt != DateTime.MinValue
-                        && (DateTime.Now - chainConfig.skill2SentAt).TotalMilliseconds <= chainConfig.comboWindowMs;
-
-                    if (!withinComboWindow)
+                    int nextIdx = step + 1;
+                    string nextKeyName = "in" + (nextIdx + 1) + "mac" + chainConfig.id;
+                    if (macro.ContainsKey(nextKeyName))
                     {
-                        chainConfig.ResetChainState();
-                        continue;
+                        MacroKey nextKey = macro[nextKeyName];
+                        if (nextKey.cooldownMs > 0)
+                        {
+                            DateTime nextLastSent = chainConfig.stepLastSentAt[nextIdx];
+                            bool nextOnCd = nextLastSent != DateTime.MinValue
+                                && (DateTime.Now - nextLastSent).TotalMilliseconds < nextKey.cooldownMs;
+                            if (nextOnCd)
+                            {
+                                chainConfig.currentChainStep = step + 1;
+                                continue;
+                            }
+                        }
                     }
                 }
 
                 SendMacroKey(roClient, macroKey, chainConfig);
                 chainConfig.stepLastSentAt[step] = DateTime.Now;
-
-                if (step == 1)
-                    chainConfig.skill2SentAt = DateTime.Now;
 
                 int nextStep = step + 1;
                 bool chainComplete = !macro.ContainsKey("in" + (nextStep + 1) + "mac" + chainConfig.id)
@@ -252,12 +231,14 @@ namespace _4RTools.Model
 
                 if (chainComplete)
                 {
-                    chainConfig.ResetChainState();
+                    if (chainConfig.comboLoopBackStep >= 0)
+                        chainConfig.currentChainStep = chainConfig.comboLoopBackStep;
+                    else
+                        chainConfig.ResetChainState();
                 }
                 else
                 {
                     chainConfig.currentChainStep = nextStep;
-                    chainConfig.stepAttemptedAt[nextStep] = DateTime.Now;
                 }
             }
             Thread.Sleep(15);
