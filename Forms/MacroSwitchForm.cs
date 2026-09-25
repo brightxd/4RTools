@@ -19,6 +19,7 @@ namespace _4RTools.Forms
             InitializeComponent();
             configureMacroLanes();
             addCooldownControls();
+            addCastControls();
             addOptionalControls();
             addWNextControls();
             addLoopBackControls();
@@ -88,6 +89,15 @@ namespace _4RTools.Forms
                         cdInput.ValueChanged -= this.onCooldownChange;
                         cdInput.Value = hasEntry ? chainConfig.macroEntries[cbName].cooldownMs : 0;
                         cdInput.ValueChanged += this.onCooldownChange;
+                    }
+
+                    Control[] cast = group.Controls.Find($"{cbName}cast", true);
+                    if (cast.Length > 0)
+                    {
+                        NumericUpDown castInput = (NumericUpDown)cast[0];
+                        castInput.ValueChanged -= this.onCastChange;
+                        castInput.Value = hasEntry ? chainConfig.macroEntries[cbName].castMs : 0;
+                        castInput.ValueChanged += this.onCastChange;
                     }
 
                     Control[] op = group.Controls.Find($"{cbName}opt", true);
@@ -224,9 +234,60 @@ namespace _4RTools.Forms
             ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
 
+        private void onCastChange(object sender, EventArgs e)
+        {
+            NumericUpDown castInput = (NumericUpDown)sender;
+            int chainID = Int16.Parse(castInput.Parent.Name.Split(new[] { "chainGroup" }, StringSplitOptions.None)[1]);
+            ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
+
+            String cbName = castInput.Name.Split(new[] { "cast" }, StringSplitOptions.None)[0];
+            if (!chainConfig.macroEntries.ContainsKey(cbName))
+                chainConfig.macroEntries[cbName] = new MacroKey(System.Windows.Input.Key.None, 0);
+            chainConfig.macroEntries[cbName].castMs = decimal.ToInt32(castInput.Value);
+            ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
+        }
+
+        private void addCastControls()
+        {
+            const int CAST_ROW_Y = 117;
+            const int EXPAND = 20;
+            const int GAP = 4;
+            int[] slotX = { 66, 135, 204, 273, 342, 411, 480 };
+
+            int y = 12;
+            for (int i = 1; i <= TOTAL_MACRO_LANES; i++)
+            {
+                GroupBox group = (GroupBox)this.Controls.Find("chainGroup" + i, true)[0];
+
+                group.Location = new System.Drawing.Point(group.Location.X, y);
+                group.Size = new System.Drawing.Size(group.Width, group.Height + EXPAND);
+
+                Label castLabel = new Label();
+                castLabel.Name = "labelCast" + i;
+                castLabel.Text = "Cast(ms):";
+                castLabel.AutoSize = true;
+                castLabel.Location = new System.Drawing.Point(4, CAST_ROW_Y + 2);
+                group.Controls.Add(castLabel);
+
+                for (int slot = 1; slot <= 7; slot++)
+                {
+                    NumericUpDown castInput = new NumericUpDown();
+                    castInput.Name = "in" + slot + "mac" + i + "cast";
+                    castInput.Location = new System.Drawing.Point(slotX[slot - 1], CAST_ROW_Y);
+                    castInput.Size = new System.Drawing.Size(47, 20);
+                    castInput.Maximum = 5000;
+                    castInput.TabIndex = 800 + (i - 1) * 7 + slot;
+                    castInput.ValueChanged += new System.EventHandler(this.onCastChange);
+                    group.Controls.Add(castInput);
+                }
+
+                y += group.Height + GAP;
+            }
+        }
+
         private void addOptionalControls()
         {
-            const int OPT_ROW_Y = 117;
+            const int OPT_ROW_Y = 139;
             const int EXPAND = 20;
             const int GAP = 4;
             int[] slotX = { 66, 135, 204, 273, 342, 411, 480 };
@@ -302,7 +363,7 @@ namespace _4RTools.Forms
 
         private void addWNextControls()
         {
-            const int WNEXT_ROW_Y = 139;
+            const int WNEXT_ROW_Y = 161;
             const int EXPAND = 20;
             const int GAP = 4;
             int[] slotX = { 66, 135, 204, 273, 342, 411, 480 };
@@ -340,7 +401,7 @@ namespace _4RTools.Forms
 
         private void addLoopBackControls()
         {
-            const int LOOP_ROW_Y = 161;
+            const int LOOP_ROW_Y = 183;
             const int EXPAND = 20;
             const int GAP = 4;
 

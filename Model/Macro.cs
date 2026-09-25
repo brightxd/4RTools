@@ -17,6 +17,11 @@ namespace _4RTools.Model
         // this value, the chain resets to step 0 instead of wasting an iteration sending
         // a key the server will reject. Set to match the skill's actual cooldown.
         public int cooldownMs { get; set; } = 0;
+        // Cast animation time (ms). stepLastSentAt is set to DateTime.Now + castMs so the
+        // CD guard doesn't clear until castMs + cooldownMs after the key press.
+        // Set this to the skill's cast animation duration so the macro doesn't retry
+        // during the cast window and cause a double-CD wait on server rejection.
+        public int castMs { get; set; } = 0;
         // When true and this step is on CD, the chain skips it and advances to the next step
         // rather than resetting to step 0. Use for skills that should fire when available
         // but must not block the chain when cooling down (e.g., a damage-amplifier buff).
@@ -223,7 +228,9 @@ namespace _4RTools.Model
                 }
 
                 SendMacroKey(roClient, macroKey, chainConfig);
-                chainConfig.stepLastSentAt[step] = DateTime.Now;
+                // Set stepLastSentAt to Now + castMs so the CD guard clears only after
+                // castMs + cooldownMs from key press — matching when the game's CD actually starts.
+                chainConfig.stepLastSentAt[step] = DateTime.Now.AddMilliseconds(macroKey.castMs);
 
                 int nextStep = step + 1;
                 bool chainComplete = !macro.ContainsKey("in" + (nextStep + 1) + "mac" + chainConfig.id)
