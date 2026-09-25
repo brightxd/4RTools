@@ -7,16 +7,21 @@ using _4RTools.Utils;
 using System.Text.RegularExpressions;
 using System.Diagnostics;
 using System.Xml.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace _4RTools.Forms
 {
     public partial class MacroSwitchForm : Form, IObserver
     {
         public static int TOTAL_MACRO_LANES = 5;
+        private CancellationTokenSource _calibCts;
+
         public MacroSwitchForm(Subject subject)
         {
             subject.Attach(this);
             InitializeComponent();
+            addCalibrationPanel();
             configureMacroLanes();
             addCooldownControls();
             addCastControls();
@@ -624,12 +629,13 @@ namespace _4RTools.Forms
 
         private void addMemoryCdControls()
         {
-            const int SKILL_ROW_Y = 293;
-            const int EXPAND     = 22;
-            const int GAP        = 4;
+            const int SKILL_ROW_Y  = 293;
+            const int EXPAND       = 32;
+            const int GAP          = 4;
+            const int CALIB_OFFSET = 56;   // height of the calibration panel at y=0
             int[] slotX = { 66, 135, 204, 273, 342, 411, 480 };
 
-            int y = 12;
+            int y = 12 + CALIB_OFFSET;
             for (int i = 1; i <= TOTAL_MACRO_LANES; i++)
             {
                 GroupBox group = (GroupBox)this.Controls.Find("chainGroup" + i, true)[0];
@@ -712,6 +718,88 @@ namespace _4RTools.Forms
         {
             base.OnResize(e);
             if (IsHandleCreated) RelayoutGroups();
+        }
+
+        private void addCalibrationPanel()
+        {
+            Panel p = new Panel();
+            p.Name        = "calibPanel";
+            p.Location    = new System.Drawing.Point(0, 0);
+            p.Size        = new System.Drawing.Size(this.ClientSize.Width, 56);
+            p.Anchor      = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            p.BorderStyle = BorderStyle.FixedSingle;
+
+            Label title = new Label { Text = "Memory CD Calibration", AutoSize = true };
+            title.Font     = new System.Drawing.Font(title.Font, System.Drawing.FontStyle.Bold);
+            title.Location = new System.Drawing.Point(4, 4);
+            p.Controls.Add(title);
+
+            Label skillLbl = new Label { Text = "Skill ID:", AutoSize = true };
+            skillLbl.Location = new System.Drawing.Point(4, 32);
+            p.Controls.Add(skillLbl);
+
+            TextBox skillTb = new TextBox { Name = "calibSkillId" };
+            skillTb.Location = new System.Drawing.Point(60, 29);
+            skillTb.Size     = new System.Drawing.Size(120, 20);
+            p.Controls.Add(skillTb);
+
+            Label cdLbl = new Label { Text = "CD(s):", AutoSize = true };
+            cdLbl.Location = new System.Drawing.Point(192, 32);
+            p.Controls.Add(cdLbl);
+
+            NumericUpDown cdNud = new NumericUpDown { Name = "calibCdSeconds" };
+            cdNud.Location = new System.Drawing.Point(237, 29);
+            cdNud.Size     = new System.Drawing.Size(60, 20);
+            cdNud.Minimum  = 1;
+            cdNud.Maximum  = 600;
+            cdNud.Value    = 10;
+            p.Controls.Add(cdNud);
+
+            Button calibBtn = new Button { Name = "calibBtn", Text = "Calibrate" };
+            calibBtn.Location = new System.Drawing.Point(307, 27);
+            calibBtn.Size     = new System.Drawing.Size(75, 24);
+            calibBtn.Click   += new EventHandler(onCalibrateClick);
+            p.Controls.Add(calibBtn);
+
+            Label statusLbl = new Label { Name = "calibStatus", AutoSize = true };
+            statusLbl.Text     = "Cast your skill, then click Calibrate.";
+            statusLbl.Location = new System.Drawing.Point(392, 32);
+            p.Controls.Add(statusLbl);
+
+            this.Controls.Add(p);
+            p.BringToFront();
+        }
+
+        private async void onCalibrateClick(object sender, EventArgs e)
+        {
+            var skillIdC = this.Controls.Find("calibSkillId", true);
+            var cdC      = this.Controls.Find("calibCdSeconds", true);
+            var statC    = this.Controls.Find("calibStatus", true);
+            if (skillIdC.Length == 0 || cdC.Length == 0 || statC.Length == 0) return;
+
+            string skillId   = ((TextBox)skillIdC[0]).Text.Trim();
+            float  cdSec     = (float)((NumericUpDown)cdC[0]).Value;
+            Label  statusLbl = (Label)statC[0];
+            Button btn       = (Button)sender;
+
+            if (string.IsNullOrEmpty(skillId)) { statusLbl.Text = "Enter a Skill ID first."; return; }
+
+            _calibCts?.Cancel();
+            _calibCts    = new CancellationTokenSource();
+            btn.Enabled  = false;
+            statusLbl.Text = $"Calibrating '{skillId}'… cast the skill now.";
+
+            try
+            {
+                await CdCalibrator.CalibrateAsync(skillId, cdSec, _calibCts.Token);
+                bool ok = CdCalibrator.GetAddress(skillId) != IntPtr.Zero;
+                statusLbl.Text = ok
+                    ? $"OK — '{skillId}' calibrated at 0x{CdCalibrator.GetAddress(skillId).ToInt64():X8}"
+                    : $"Failed — no unique CD address found for '{skillId}'.";
+            }
+            catch (OperationCanceledException) { statusLbl.Text = "Cancelled."; }
+            catch (Exception ex)               { statusLbl.Text = $"Error: {ex.Message}"; }
+            finally                            { btn.Enabled = true; }
         }
 
         private void onSkillIdChange(object sender, EventArgs e)
