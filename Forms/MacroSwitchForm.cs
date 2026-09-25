@@ -645,7 +645,7 @@ namespace _4RTools.Forms
                     TextBox tb = new TextBox();
                     tb.Name     = "in" + slot + "mac" + i + "skillid";
                     tb.Location = new System.Drawing.Point(slotX[slot - 1], SKILL_ROW_Y);
-                    tb.Size     = new System.Drawing.Size(63, 20);
+                    tb.Size     = new System.Drawing.Size(47, 20);
                     tb.TextChanged += new System.EventHandler(this.onSkillIdChange);
                     group.Controls.Add(tb);
                 }
@@ -686,7 +686,7 @@ namespace _4RTools.Forms
                 GroupBox group = (GroupBox)found[0];
 
                 int available = group.Width - LABEL_COL - RIGHT_PAD;
-                int stride    = Math.Max(MIN_STRIDE, available / 6);
+                int stride    = Math.Max(MIN_STRIDE, available / 7);
 
                 for (int slot = 1; slot <= 7; slot++)
                 {
