@@ -6,6 +6,7 @@ using System.Windows.Forms;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Net;
+using _4RTools.Utils;
 
 namespace _4RTools.Model
 {
