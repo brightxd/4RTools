@@ -32,6 +32,33 @@ This project was created using Visual Studio 2022, just open `4RTools.sln` in Vi
 - [x] Macro Switch/Macro Chain
 - [x] ATK x DEF Mode switch
 
+## Conditional macro chains
+
+Macro Switch steps can be guarded without changing existing profiles:
+
+- `CD(ms)` and `Cast(ms)` prevent a step from being sent during its local
+  cooldown or cast animation.
+- `W/Next` makes a setup step fire only when the immediately following step is
+  ready.
+- `Wait CD` keeps a step pending while its cooldown is active instead of
+  restarting the chain and replaying earlier setup skills.
+- `Status ID` plus `Has status` gates a step against the status buffer read from
+  the selected client. Use `-1` to disable the status gate.
+
+For a strict local sequence such as `Skill 1 -> Lex -> Skill 3`, configure:
+
+1. Slot 1: `Skill 1`.
+2. Slot 2: `Lex`, with `W/Next` enabled.
+3. Slot 3: `Skill 3`, with its real `CD(ms)` and `Wait CD` enabled.
+
+The chain then advances to `Lex` only when slot 3 is locally ready, sends
+`Skill 3` immediately after `Lex`, and waits on slot 3's cooldown without
+replaying slot 1. These guards guarantee the order in which 4RTools dispatches
+the input messages; they cannot prove server acceptance. For that, the client
+must expose an observable success status in the character status buffer or the
+server must provide an authorized acknowledgement/API. Target-only effects
+cannot be confirmed through the existing self-status buffer.
+
 #### References
 https://github.com/k1ngJ/dtAP
 

@@ -17,7 +17,7 @@ namespace _4RTools.Model
         // this value, the chain resets to step 0 instead of wasting an iteration sending
         // a key the server will reject. Set to match the skill's actual cooldown.
         public int cooldownMs { get; set; } = 0;
-        // Cast animation time (ms). stepLastSentAt is set to DateTime.Now + castMs so the
+        // Cast animation time (ms). stepLastSentAt is set to DateTime.UtcNow + castMs so the
         // CD guard doesn't clear until castMs + cooldownMs after the key press.
         // Set this to the skill's cast animation duration so the macro doesn't retry
         // during the cast window and cause a double-CD wait on server rejection.
@@ -30,6 +30,13 @@ namespace _4RTools.Model
         // Use for a buff skill that should only be cast immediately before the buffed skill
         // to avoid wasting the buff window when the main skill is not ready.
         public bool fireOnlyWithNext { get; set; } = false;
+        // Keep this step pending while its local cooldown is active. This is useful
+        // for the final skill in a chain: earlier setup skills must not be repeated.
+        public bool waitForCooldown { get; set; } = false;
+        // Optional status gate. -1 disables the gate; otherwise the step requires
+        // the status to be present (or absent when conditionStatusPresent is false).
+        public int conditionStatusId { get; set; } = -1;
+        public bool conditionStatusPresent { get; set; } = true;
 
         public MacroKey(Key key, int delay)
         {
@@ -155,8 +162,75 @@ namespace _4RTools.Model
             }
         }
 
+        private static bool IsStepOnCooldown(ChainConfig chainConfig, int step, MacroKey macroKey, DateTime now)
+        {
+            if (macroKey.cooldownMs <= 0 || step < 0 || step >= chainConfig.stepLastSentAt.Length)
+                return false;
+
+            DateTime lastSent = chainConfig.stepLastSentAt[step];
+            return lastSent != DateTime.MinValue
+                && (now - lastSent).TotalMilliseconds < macroKey.cooldownMs;
+        }
+
+        private static bool IsConditionSatisfied(
+            MacroKey macroKey,
+            HashSet<uint> activeStatusCodes,
+            bool statusSnapshotAvailable)
+        {
+            if (macroKey.conditionStatusId < 0)
+                return true;
+
+            if (!statusSnapshotAvailable)
+                return false;
+
+            bool statusPresent = activeStatusCodes.Contains((uint)macroKey.conditionStatusId);
+            return statusPresent == macroKey.conditionStatusPresent;
+        }
+
+        private static bool IsStepReady(
+            ChainConfig chainConfig,
+            int step,
+            MacroKey macroKey,
+            DateTime now,
+            HashSet<uint> activeStatusCodes,
+            bool statusSnapshotAvailable)
+        {
+            return macroKey.key != Key.None
+                && !IsStepOnCooldown(chainConfig, step, macroKey, now)
+                && IsConditionSatisfied(macroKey, activeStatusCodes, statusSnapshotAvailable);
+        }
+
+        private bool HasStatusConditions()
+        {
+            foreach (ChainConfig chainConfig in this.chainConfigs)
+            {
+                foreach (MacroKey macroKey in chainConfig.macroEntries.Values)
+                {
+                    if (macroKey.conditionStatusId >= 0)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Set to true and rebuild to write fire/skip events to %TEMP%\4rtools_trace.txt
+        public static bool TraceEnabled = false;
+        private static readonly string TraceFile =
+            System.IO.Path.Combine(System.IO.Path.GetTempPath(), "4rtools_trace.txt");
+        private static void Trace(string msg)
+        {
+            if (!TraceEnabled) return;
+            try { System.IO.File.AppendAllText(TraceFile, $"{DateTime.UtcNow:HH:mm:ss.fff}  {msg}\n"); }
+            catch { }
+        }
+
         private int MacroExecutionThread(Client roClient)
         {
+            HashSet<uint> activeStatusCodes = new HashSet<uint>();
+            bool statusSnapshotAvailable = !HasStatusConditions()
+                || roClient.TryGetActiveStatusCodes(out activeStatusCodes);
+
             foreach (ChainConfig chainConfig in this.chainConfigs)
             {
                 if (chainConfig.trigger == Key.None) continue;
@@ -188,24 +262,42 @@ namespace _4RTools.Model
                     continue;
                 }
 
+                DateTime now = DateTime.UtcNow;
+
                 // Per-step local cooldown guard.
-                // optional=true  → skip to next step (chain keeps moving)
-                // optional=false → reset chain to step 0
-                if (macroKey.cooldownMs > 0)
+                // waitForCooldown=true → hold this step (do not replay setup steps)
+                // optional=true        → skip to next step
+                // otherwise            → reset chain to step 0
+                if (IsStepOnCooldown(chainConfig, step, macroKey, now))
                 {
-                    DateTime lastSent = chainConfig.stepLastSentAt[step];
-                    if (lastSent != DateTime.MinValue
-                        && (DateTime.Now - lastSent).TotalMilliseconds < macroKey.cooldownMs)
+                    if (macroKey.waitForCooldown)
                     {
-                        if (macroKey.optional)
-                            chainConfig.currentChainStep = step + 1;
-                        else
-                            chainConfig.ResetChainState();
                         continue;
                     }
+
+                    if (macroKey.optional)
+                    {
+                        chainConfig.currentChainStep = step + 1;
+                        continue;
+                    }
+
+                    chainConfig.ResetChainState();
+                    continue;
                 }
 
-                // fireOnlyWithNext: skip (like optional) when the next step is on CD.
+                if (!IsConditionSatisfied(macroKey, activeStatusCodes, statusSnapshotAvailable))
+                {
+                    // A configured condition is a hard gate by default. If the
+                    // step is optional, it may be skipped without firing.
+                    if (macroKey.optional)
+                    {
+                        chainConfig.currentChainStep = step + 1;
+                    }
+                    continue;
+                }
+
+                // fireOnlyWithNext: skip when the next step is not ready, so a
+                // setup skill is never spent without its immediately following skill.
                 if (macroKey.fireOnlyWithNext)
                 {
                     int nextIdx = step + 1;
@@ -213,24 +305,29 @@ namespace _4RTools.Model
                     if (macro.ContainsKey(nextKeyName))
                     {
                         MacroKey nextKey = macro[nextKeyName];
-                        if (nextKey.cooldownMs > 0)
+                        if (!IsStepReady(
+                            chainConfig,
+                            nextIdx,
+                            nextKey,
+                            now,
+                            activeStatusCodes,
+                            statusSnapshotAvailable))
                         {
-                            DateTime nextLastSent = chainConfig.stepLastSentAt[nextIdx];
-                            bool nextOnCd = nextLastSent != DateTime.MinValue
-                                && (DateTime.Now - nextLastSent).TotalMilliseconds < nextKey.cooldownMs;
-                            if (nextOnCd)
-                            {
-                                chainConfig.currentChainStep = step + 1;
-                                continue;
-                            }
+                            double nextCdRemaining = nextKey.cooldownMs > 0
+                                ? nextKey.cooldownMs - (now - chainConfig.stepLastSentAt[nextIdx]).TotalMilliseconds
+                                : 0;
+                            Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_SKIP nextKey={nextKey.key} cdRemaining={nextCdRemaining:F0}ms");
+                            chainConfig.currentChainStep = nextIdx;
+                            continue;
                         }
                     }
                 }
 
                 SendMacroKey(roClient, macroKey, chainConfig);
+                Trace($"chain={chainConfig.id} step={step} key={macroKey.key} FIRE");
                 // Set stepLastSentAt to Now + castMs so the CD guard clears only after
                 // castMs + cooldownMs from key press — matching when the game's CD actually starts.
-                chainConfig.stepLastSentAt[step] = DateTime.Now.AddMilliseconds(macroKey.castMs);
+                chainConfig.stepLastSentAt[step] = DateTime.UtcNow.AddMilliseconds(macroKey.castMs);
 
                 int nextStep = step + 1;
                 bool chainComplete = !macro.ContainsKey("in" + (nextStep + 1) + "mac" + chainConfig.id)

@@ -23,6 +23,7 @@ namespace _4RTools.Forms
             addOptionalControls();
             addWNextControls();
             addLoopBackControls();
+            addConditionControls();
         }
 
         public void Update(ISubject subject)
@@ -117,6 +118,33 @@ namespace _4RTools.Forms
                         wnInput.Checked = hasEntry && chainConfig.macroEntries[cbName].fireOnlyWithNext;
                         wnInput.CheckedChanged += this.onWNextChange;
                     }
+
+                    Control[] wait = group.Controls.Find($"{cbName}waitcd", true);
+                    if (wait.Length > 0)
+                    {
+                        CheckBox waitInput = (CheckBox)wait[0];
+                        waitInput.CheckedChanged -= this.onWaitCooldownChange;
+                        waitInput.Checked = hasEntry && chainConfig.macroEntries[cbName].waitForCooldown;
+                        waitInput.CheckedChanged += this.onWaitCooldownChange;
+                    }
+
+                    Control[] conditionStatus = group.Controls.Find($"{cbName}condstatus", true);
+                    if (conditionStatus.Length > 0)
+                    {
+                        NumericUpDown statusInput = (NumericUpDown)conditionStatus[0];
+                        statusInput.ValueChanged -= this.onConditionStatusChange;
+                        statusInput.Value = hasEntry ? chainConfig.macroEntries[cbName].conditionStatusId : -1;
+                        statusInput.ValueChanged += this.onConditionStatusChange;
+                    }
+
+                    Control[] conditionPresent = group.Controls.Find($"{cbName}condpresent", true);
+                    if (conditionPresent.Length > 0)
+                    {
+                        CheckBox presentInput = (CheckBox)conditionPresent[0];
+                        presentInput.CheckedChanged -= this.onConditionPresentChange;
+                        presentInput.Checked = hasEntry && chainConfig.macroEntries[cbName].conditionStatusPresent;
+                        presentInput.CheckedChanged += this.onConditionPresentChange;
+                    }
                 }
 
                 // Loop-back: 0 = disabled, 1-7 = loop to that slot (1-indexed)
@@ -149,10 +177,22 @@ namespace _4RTools.Forms
                 && chainConfig.macroEntries[textBox.Name].optional;
             bool existingFireOnlyWithNext = chainConfig.macroEntries.ContainsKey(textBox.Name)
                 && chainConfig.macroEntries[textBox.Name].fireOnlyWithNext;
-            chainConfig.macroEntries[textBox.Name] = new MacroKey(key, decimal.ToInt16(delayInput.Value));
-            chainConfig.macroEntries[textBox.Name].cooldownMs = existingCooldown;
-            chainConfig.macroEntries[textBox.Name].optional = existingOptional;
-            chainConfig.macroEntries[textBox.Name].fireOnlyWithNext = existingFireOnlyWithNext;
+            MacroKey existingMacroKey = chainConfig.macroEntries.ContainsKey(textBox.Name)
+                ? chainConfig.macroEntries[textBox.Name]
+                : null;
+            MacroKey updatedMacroKey = new MacroKey(key, decimal.ToInt16(delayInput.Value));
+            if (existingMacroKey != null)
+            {
+                updatedMacroKey.hasClick = existingMacroKey.hasClick;
+                updatedMacroKey.cooldownMs = existingCooldown;
+                updatedMacroKey.castMs = existingMacroKey.castMs;
+                updatedMacroKey.optional = existingOptional;
+                updatedMacroKey.fireOnlyWithNext = existingFireOnlyWithNext;
+                updatedMacroKey.waitForCooldown = existingMacroKey.waitForCooldown;
+                updatedMacroKey.conditionStatusId = existingMacroKey.conditionStatusId;
+                updatedMacroKey.conditionStatusPresent = existingMacroKey.conditionStatusPresent;
+            }
+            chainConfig.macroEntries[textBox.Name] = updatedMacroKey;
 
             bool isFirstInput = Regex.IsMatch(textBox.Name, $"in1mac{chainID}");
             if (isFirstInput) { chainConfig.trigger = key; }
@@ -168,7 +208,7 @@ namespace _4RTools.Forms
             ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
 
             String cbName = delayInput.Name.Split(new[] { "delay" }, StringSplitOptions.None)[0];
-            chainConfig.macroEntries[cbName].delay = decimal.ToInt16(delayInput.Value);
+            GetOrCreateMacroKey(chainConfig, cbName).delay = decimal.ToInt16(delayInput.Value);
 
             ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
@@ -180,8 +220,16 @@ namespace _4RTools.Forms
             ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
 
             String cbName = checkInput.Name.Split(new[] { "click" }, StringSplitOptions.None)[0];
-            chainConfig.macroEntries[cbName].hasClick = checkInput.Checked;
+            GetOrCreateMacroKey(chainConfig, cbName).hasClick = checkInput.Checked;
             ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
+        }
+
+        private MacroKey GetOrCreateMacroKey(ChainConfig chainConfig, string name)
+        {
+            if (!chainConfig.macroEntries.ContainsKey(name))
+                chainConfig.macroEntries[name] = new MacroKey(System.Windows.Input.Key.None, 0);
+
+            return chainConfig.macroEntries[name];
         }
 
         private void onCooldownChange(object sender, EventArgs e)
@@ -191,9 +239,7 @@ namespace _4RTools.Forms
             ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
 
             String cbName = cdInput.Name.Split(new[] { "cooldown" }, StringSplitOptions.None)[0];
-            if (!chainConfig.macroEntries.ContainsKey(cbName))
-                chainConfig.macroEntries[cbName] = new MacroKey(System.Windows.Input.Key.None, 0);
-            chainConfig.macroEntries[cbName].cooldownMs = decimal.ToInt32(cdInput.Value);
+            GetOrCreateMacroKey(chainConfig, cbName).cooldownMs = decimal.ToInt32(cdInput.Value);
             ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
 
@@ -204,9 +250,7 @@ namespace _4RTools.Forms
             ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
 
             String cbName = optInput.Name.Split(new[] { "opt" }, StringSplitOptions.None)[0];
-            if (!chainConfig.macroEntries.ContainsKey(cbName))
-                chainConfig.macroEntries[cbName] = new MacroKey(System.Windows.Input.Key.None, 0);
-            chainConfig.macroEntries[cbName].optional = optInput.Checked;
+            GetOrCreateMacroKey(chainConfig, cbName).optional = optInput.Checked;
             ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
 
@@ -228,9 +272,7 @@ namespace _4RTools.Forms
             ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
 
             String cbName = wnInput.Name.Split(new[] { "wnext" }, StringSplitOptions.None)[0];
-            if (!chainConfig.macroEntries.ContainsKey(cbName))
-                chainConfig.macroEntries[cbName] = new MacroKey(System.Windows.Input.Key.None, 0);
-            chainConfig.macroEntries[cbName].fireOnlyWithNext = wnInput.Checked;
+            GetOrCreateMacroKey(chainConfig, cbName).fireOnlyWithNext = wnInput.Checked;
             ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
 
@@ -241,9 +283,37 @@ namespace _4RTools.Forms
             ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
 
             String cbName = castInput.Name.Split(new[] { "cast" }, StringSplitOptions.None)[0];
-            if (!chainConfig.macroEntries.ContainsKey(cbName))
-                chainConfig.macroEntries[cbName] = new MacroKey(System.Windows.Input.Key.None, 0);
-            chainConfig.macroEntries[cbName].castMs = decimal.ToInt32(castInput.Value);
+            GetOrCreateMacroKey(chainConfig, cbName).castMs = decimal.ToInt32(castInput.Value);
+            ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
+        }
+
+        private void onWaitCooldownChange(object sender, EventArgs e)
+        {
+            CheckBox waitInput = (CheckBox)sender;
+            int chainID = Int16.Parse(waitInput.Parent.Name.Split(new[] { "chainGroup" }, StringSplitOptions.None)[1]);
+            ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
+            string cbName = waitInput.Name.Split(new[] { "waitcd" }, StringSplitOptions.None)[0];
+            GetOrCreateMacroKey(chainConfig, cbName).waitForCooldown = waitInput.Checked;
+            ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
+        }
+
+        private void onConditionStatusChange(object sender, EventArgs e)
+        {
+            NumericUpDown statusInput = (NumericUpDown)sender;
+            int chainID = Int16.Parse(statusInput.Parent.Name.Split(new[] { "chainGroup" }, StringSplitOptions.None)[1]);
+            ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
+            string cbName = statusInput.Name.Split(new[] { "condstatus" }, StringSplitOptions.None)[0];
+            GetOrCreateMacroKey(chainConfig, cbName).conditionStatusId = decimal.ToInt32(statusInput.Value);
+            ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
+        }
+
+        private void onConditionPresentChange(object sender, EventArgs e)
+        {
+            CheckBox presentInput = (CheckBox)sender;
+            int chainID = Int16.Parse(presentInput.Parent.Name.Split(new[] { "chainGroup" }, StringSplitOptions.None)[1]);
+            ChainConfig chainConfig = ProfileSingleton.GetCurrent().MacroSwitch.chainConfigs.Find(config => config.id == chainID);
+            string cbName = presentInput.Name.Split(new[] { "condpresent" }, StringSplitOptions.None)[0];
+            GetOrCreateMacroKey(chainConfig, cbName).conditionStatusPresent = presentInput.Checked;
             ProfileSingleton.SetConfiguration(ProfileSingleton.GetCurrent().MacroSwitch);
         }
 
@@ -429,6 +499,75 @@ namespace _4RTools.Forms
                 lbInput.TabIndex = 600 + i;
                 lbInput.ValueChanged += new System.EventHandler(this.onLoopBackChange);
                 group.Controls.Add(lbInput);
+
+                y += group.Height + GAP;
+            }
+        }
+
+        private void addConditionControls()
+        {
+            const int WAIT_ROW_Y = 205;
+            const int STATUS_ROW_Y = 227;
+            const int PRESENT_ROW_Y = 249;
+            const int EXPAND = 60;
+            const int GAP = 4;
+            int[] slotX = { 66, 135, 204, 273, 342, 411, 480 };
+
+            int y = 12;
+            for (int i = 1; i <= TOTAL_MACRO_LANES; i++)
+            {
+                GroupBox group = (GroupBox)this.Controls.Find("chainGroup" + i, true)[0];
+                group.Location = new System.Drawing.Point(group.Location.X, y);
+                group.Size = new System.Drawing.Size(group.Width, group.Height + EXPAND);
+
+                Label waitLabel = new Label();
+                waitLabel.Name = "labelWaitCd" + i;
+                waitLabel.Text = "Wait CD:";
+                waitLabel.AutoSize = true;
+                waitLabel.Location = new System.Drawing.Point(4, WAIT_ROW_Y + 2);
+                group.Controls.Add(waitLabel);
+
+                Label statusLabel = new Label();
+                statusLabel.Name = "labelCondStatus" + i;
+                statusLabel.Text = "Status ID:";
+                statusLabel.AutoSize = true;
+                statusLabel.Location = new System.Drawing.Point(4, STATUS_ROW_Y + 2);
+                group.Controls.Add(statusLabel);
+
+                Label presentLabel = new Label();
+                presentLabel.Name = "labelCondPresent" + i;
+                presentLabel.Text = "Has status:";
+                presentLabel.AutoSize = true;
+                presentLabel.Location = new System.Drawing.Point(4, PRESENT_ROW_Y + 2);
+                group.Controls.Add(presentLabel);
+
+                for (int slot = 1; slot <= 7; slot++)
+                {
+                    CheckBox waitInput = new CheckBox();
+                    waitInput.Name = "in" + slot + "mac" + i + "waitcd";
+                    waitInput.Location = new System.Drawing.Point(slotX[slot - 1] + 4, WAIT_ROW_Y);
+                    waitInput.Size = new System.Drawing.Size(40, 17);
+                    waitInput.CheckedChanged += new System.EventHandler(this.onWaitCooldownChange);
+                    group.Controls.Add(waitInput);
+
+                    NumericUpDown statusInput = new NumericUpDown();
+                    statusInput.Name = "in" + slot + "mac" + i + "condstatus";
+                    statusInput.Location = new System.Drawing.Point(slotX[slot - 1], STATUS_ROW_Y);
+                    statusInput.Size = new System.Drawing.Size(47, 20);
+                    statusInput.Minimum = -1;
+                    statusInput.Maximum = 5000;
+                    statusInput.Value = -1;
+                    statusInput.ValueChanged += new System.EventHandler(this.onConditionStatusChange);
+                    group.Controls.Add(statusInput);
+
+                    CheckBox presentInput = new CheckBox();
+                    presentInput.Name = "in" + slot + "mac" + i + "condpresent";
+                    presentInput.Location = new System.Drawing.Point(slotX[slot - 1] + 4, PRESENT_ROW_Y);
+                    presentInput.Size = new System.Drawing.Size(40, 17);
+                    presentInput.Checked = true;
+                    presentInput.CheckedChanged += new System.EventHandler(this.onConditionPresentChange);
+                    group.Controls.Add(presentInput);
+                }
 
                 y += group.Height + GAP;
             }

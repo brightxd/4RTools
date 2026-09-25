@@ -91,6 +91,10 @@ namespace _4RTools.Model
         public int currentHPBaseAddress { get; set; }
         private int statusBufferAddress { get; set; }
         private int _num = 0;
+        private readonly object statusCacheLock = new object();
+        private HashSet<uint> cachedStatusCodes = new HashSet<uint>();
+        private DateTime statusCacheReadAt = DateTime.MinValue;
+        private const int STATUS_CACHE_TTL_MS = 50;
 
         public Client(string processName, int currentHPBaseAddress, int currentNameAddress)
         {
@@ -212,6 +216,38 @@ namespace _4RTools.Model
         public uint CurrentBuffStatusCode(int effectStatusIndex)
         {
             return ReadMemory(this.statusBufferAddress + effectStatusIndex * 4);
+        }
+
+        public bool TryGetActiveStatusCodes(out HashSet<uint> statusCodes)
+        {
+            statusCodes = new HashSet<uint>();
+            if (PMR == null || statusBufferAddress == 0)
+                return false;
+
+            DateTime now = DateTime.UtcNow;
+            lock (statusCacheLock)
+            {
+                if ((now - statusCacheReadAt).TotalMilliseconds < STATUS_CACHE_TTL_MS)
+                {
+                    statusCodes = new HashSet<uint>(cachedStatusCodes);
+                    return true;
+                }
+            }
+
+            HashSet<uint> freshStatusCodes = new HashSet<uint>();
+            for (int i = 0; i < Constants.MAX_BUFF_LIST_INDEX_SIZE; i++)
+            {
+                freshStatusCodes.Add(CurrentBuffStatusCode(i));
+            }
+
+            lock (statusCacheLock)
+            {
+                cachedStatusCodes = freshStatusCodes;
+                statusCacheReadAt = now;
+                statusCodes = new HashSet<uint>(cachedStatusCodes);
+            }
+
+            return true;
         }
 
         public Client GetClientByProcess(string processName)
