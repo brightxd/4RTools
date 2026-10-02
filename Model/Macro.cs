@@ -384,9 +384,9 @@ namespace _4RTools.Model
 
                     if (macroKey.fireOnlyWithNext)
                     {
-                        // Scan ahead: fire only if at least one subsequent step will actually execute.
-                        // Optional steps that are on CD would be skipped, so scan past them.
-                        // A non-optional blocked step stops the scan (chain would reset there anyway).
+                        // Find the first non-optional step ahead and gate on its readiness.
+                        // Optional steps are skipped — they would be skipped in the drain
+                        // anyway and should not influence whether this step fires.
                         bool chainWillContinue = false;
                         for (int la = step + 1; ; la++)
                         {
@@ -394,16 +394,13 @@ namespace _4RTools.Model
                             if (!macro.ContainsKey(laKeyName)) break;
                             MacroKey laKey = macro[laKeyName];
                             if (laKey.key == Key.None) break;
-                            if (IsStepReady(chainConfig, la, laKey, now, activeStatusCodes, statusSnapshotAvailable))
-                            {
-                                chainWillContinue = true;
-                                break;
-                            }
-                            if (!laKey.optional) break;
+                            if (laKey.optional) continue;
+                            chainWillContinue = IsStepReady(chainConfig, la, laKey, now, activeStatusCodes, statusSnapshotAvailable);
+                            break;
                         }
                         if (!chainWillContinue)
                         {
-                            Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_SKIP no ready steps ahead");
+                            Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_SKIP no ready non-optional step ahead");
                             chainConfig.currentChainStep = step + 1;
                             break;
                         }
