@@ -384,20 +384,28 @@ namespace _4RTools.Model
 
                     if (macroKey.fireOnlyWithNext)
                     {
-                        int nextIdx = step + 1;
-                        string nextKeyName = "in" + (nextIdx + 1) + "mac" + chainConfig.id;
-                        if (macro.ContainsKey(nextKeyName))
+                        // Scan ahead: fire only if at least one subsequent step will actually execute.
+                        // Optional steps that are on CD would be skipped, so scan past them.
+                        // A non-optional blocked step stops the scan (chain would reset there anyway).
+                        bool chainWillContinue = false;
+                        for (int la = step + 1; ; la++)
                         {
-                            MacroKey nextKey = macro[nextKeyName];
-                            if (!IsStepReady(chainConfig, nextIdx, nextKey, now, activeStatusCodes, statusSnapshotAvailable))
+                            string laKeyName = "in" + (la + 1) + "mac" + chainConfig.id;
+                            if (!macro.ContainsKey(laKeyName)) break;
+                            MacroKey laKey = macro[laKeyName];
+                            if (laKey.key == Key.None) break;
+                            if (IsStepReady(chainConfig, la, laKey, now, activeStatusCodes, statusSnapshotAvailable))
                             {
-                                double nextCdRemaining = nextKey.cooldownMs > 0
-                                    ? nextKey.cooldownMs - (now - chainConfig.stepLastSentAt[nextIdx]).TotalMilliseconds
-                                    : 0;
-                                Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_SKIP nextKey={nextKey.key} cdRemaining={nextCdRemaining:F0}ms");
-                                chainConfig.currentChainStep = nextIdx;
+                                chainWillContinue = true;
                                 break;
                             }
+                            if (!laKey.optional) break;
+                        }
+                        if (!chainWillContinue)
+                        {
+                            Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_SKIP no ready steps ahead");
+                            chainConfig.currentChainStep = step + 1;
+                            break;
                         }
                     }
 
