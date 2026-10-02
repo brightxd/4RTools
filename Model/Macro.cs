@@ -384,9 +384,10 @@ namespace _4RTools.Model
 
                     if (macroKey.fireOnlyWithNext)
                     {
-                        // Find the first non-optional step ahead and gate on its readiness.
-                        // Optional steps are skipped — they would be skipped in the drain
-                        // anyway and should not influence whether this step fires.
+                        // Scan forward: fire this step only if at least one subsequent step
+                        // will execute. Optional steps on CD are skipped (drain skips them
+                        // too). A non-optional step that is blocked stops the scan — the
+                        // chain would reset there and there would be nothing to boost.
                         bool chainWillContinue = false;
                         for (int la = step + 1; ; la++)
                         {
@@ -394,13 +395,16 @@ namespace _4RTools.Model
                             if (!macro.ContainsKey(laKeyName)) break;
                             MacroKey laKey = macro[laKeyName];
                             if (laKey.key == Key.None) break;
-                            if (laKey.optional) continue;
-                            chainWillContinue = IsStepReady(chainConfig, la, laKey, now, activeStatusCodes, statusSnapshotAvailable);
-                            break;
+                            if (IsStepReady(chainConfig, la, laKey, now, activeStatusCodes, statusSnapshotAvailable))
+                            {
+                                chainWillContinue = true;
+                                break;
+                            }
+                            if (!laKey.optional) break;
                         }
                         if (!chainWillContinue)
                         {
-                            Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_SKIP no ready non-optional step ahead");
+                            Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_SKIP no ready steps ahead");
                             chainConfig.currentChainStep = step + 1;
                             break;
                         }
