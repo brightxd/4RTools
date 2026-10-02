@@ -240,6 +240,38 @@ namespace _4RTools.Model
             }
         }
 
+        // Read-only CD check for lookahead use. Never transitions the state machine.
+        // For memory-backed skills reads CdCalibrator directly; for local-timer uses stepLastSentAt.
+        private static bool PeekStepOnCooldown(ChainConfig chainConfig, int step, MacroKey macroKey, DateTime now)
+        {
+            if (step < 0 || step >= chainConfig.stepLastSentAt.Length) return false;
+
+            IntPtr cdAddr = string.IsNullOrEmpty(macroKey.skillId)
+                ? IntPtr.Zero
+                : CdCalibrator.GetAddress(macroKey.skillId);
+
+            if (cdAddr != IntPtr.Zero)
+                return CdCalibrator.ReadCd(macroKey.skillId) > 0.05f;
+
+            if (macroKey.cooldownMs <= 0) return false;
+            DateTime lastSent = chainConfig.stepLastSentAt[step];
+            return lastSent != DateTime.MinValue
+                && (now - lastSent).TotalMilliseconds < macroKey.cooldownMs;
+        }
+
+        private static bool PeekStepReady(
+            ChainConfig chainConfig,
+            int step,
+            MacroKey macroKey,
+            DateTime now,
+            HashSet<uint> activeStatusCodes,
+            bool statusSnapshotAvailable)
+        {
+            return macroKey.key != Key.None
+                && !PeekStepOnCooldown(chainConfig, step, macroKey, now)
+                && IsConditionSatisfied(macroKey, activeStatusCodes, statusSnapshotAvailable);
+        }
+
         private static bool IsConditionSatisfied(
             MacroKey macroKey,
             HashSet<uint> activeStatusCodes,
@@ -253,19 +285,6 @@ namespace _4RTools.Model
 
             bool statusPresent = activeStatusCodes.Contains((uint)macroKey.conditionStatusId);
             return statusPresent == macroKey.conditionStatusPresent;
-        }
-
-        private static bool IsStepReady(
-            ChainConfig chainConfig,
-            int step,
-            MacroKey macroKey,
-            DateTime now,
-            HashSet<uint> activeStatusCodes,
-            bool statusSnapshotAvailable)
-        {
-            return macroKey.key != Key.None
-                && !IsStepOnCooldown(chainConfig, step, macroKey, now)
-                && IsConditionSatisfied(macroKey, activeStatusCodes, statusSnapshotAvailable);
         }
 
         private bool HasStatusConditions()
@@ -395,7 +414,7 @@ namespace _4RTools.Model
                             if (!macro.ContainsKey(laKeyName)) break;
                             MacroKey laKey = macro[laKeyName];
                             if (laKey.key == Key.None) break;
-                            if (IsStepReady(chainConfig, la, laKey, now, activeStatusCodes, statusSnapshotAvailable))
+                            if (PeekStepReady(chainConfig, la, laKey, now, activeStatusCodes, statusSnapshotAvailable))
                             {
                                 chainWillContinue = true;
                                 break;
