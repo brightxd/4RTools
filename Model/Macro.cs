@@ -302,7 +302,7 @@ namespace _4RTools.Model
         }
 
         // Set to true and rebuild to write fire/skip events to %TEMP%\4rtools_trace.txt
-        public static bool TraceEnabled = false;
+        public static bool TraceEnabled = true;
         private static readonly string TraceFile =
             System.IO.Path.Combine(System.IO.Path.GetTempPath(), "4rtools_trace.txt");
         private static void Trace(string msg)
@@ -403,6 +403,7 @@ namespace _4RTools.Model
 
                     if (macroKey.fireOnlyWithNext)
                     {
+                        Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_ENTER cdMs={macroKey.cooldownMs} opt={macroKey.optional}");
                         // Scan forward: fire this step only if at least one subsequent step
                         // will execute. Optional steps on CD are skipped (drain skips them
                         // too). A non-optional step that is blocked stops the scan — the
@@ -411,10 +412,18 @@ namespace _4RTools.Model
                         for (int la = step + 1; ; la++)
                         {
                             string laKeyName = "in" + (la + 1) + "mac" + chainConfig.id;
-                            if (!macro.ContainsKey(laKeyName)) break;
+                            if (!macro.ContainsKey(laKeyName)) { Trace($"chain={chainConfig.id} WNEXT la={la} NO_KEY"); break; }
                             MacroKey laKey = macro[laKeyName];
-                            if (laKey.key == Key.None) break;
-                            if (PeekStepReady(chainConfig, la, laKey, now, activeStatusCodes, statusSnapshotAvailable))
+                            if (laKey.key == Key.None) { Trace($"chain={chainConfig.id} WNEXT la={la} KEY_NONE"); break; }
+                            bool laOnCd = PeekStepOnCooldown(chainConfig, la, laKey, now);
+                            bool laReady = !laOnCd && IsConditionSatisfied(laKey, activeStatusCodes, statusSnapshotAvailable);
+                            IntPtr laAddr = string.IsNullOrEmpty(laKey.skillId) ? IntPtr.Zero : CdCalibrator.GetAddress(laKey.skillId);
+                            double laTimer = (laAddr == IntPtr.Zero && laKey.cooldownMs > 0)
+                                ? (now - chainConfig.stepLastSentAt[la]).TotalMilliseconds
+                                : -1;
+                            float laMemCd = laAddr != IntPtr.Zero ? CdCalibrator.ReadCd(laKey.skillId) : -1f;
+                            Trace($"chain={chainConfig.id} WNEXT la={la} key={laKey.key} skillId={laKey.skillId ?? "-"} onCd={laOnCd} ready={laReady} opt={laKey.optional} cdMs={laKey.cooldownMs} timerElapsed={laTimer:F0} memCd={laMemCd:F3} lastSentIsMin={chainConfig.stepLastSentAt[la] == DateTime.MinValue}");
+                            if (laReady)
                             {
                                 chainWillContinue = true;
                                 break;
@@ -427,6 +436,7 @@ namespace _4RTools.Model
                             chainConfig.currentChainStep = step + 1;
                             break;
                         }
+                        Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_PASS will fire");
                     }
 
                     SendMacroKey(roClient, macroKey, chainConfig);
