@@ -78,6 +78,12 @@ namespace _4RTools.Model
         // When >= 0, chain loops to this step (0-indexed) after the last step fires instead of
         // resetting to step 0. Enables cycling of late combo skills without re-triggering setup.
         public int comboLoopBackStep { get; set; } = -1;
+        // Milliseconds to wait after trigger release before resetting chain to step 0.
+        // 0 (default) = immediate reset on release, matching previous behavior.
+        public int triggerReleaseResetMs { get; set; } = 0;
+
+        [JsonIgnore] public DateTime nextStepReadyAt = DateTime.MinValue;
+        [JsonIgnore] public DateTime triggerReleasedAt = DateTime.MinValue;
 
         public ChainConfig() { }
         public ChainConfig(int id)
@@ -96,6 +102,7 @@ namespace _4RTools.Model
             this.infinityLoop = macro.infinityLoop;
             this.macroEntries = new Dictionary<string, MacroKey>(macro.macroEntries);
             this.comboLoopBackStep = macro.comboLoopBackStep;
+            this.triggerReleaseResetMs = macro.triggerReleaseResetMs;
         }
         public ChainConfig(int id, Key trigger)
         {
@@ -107,6 +114,8 @@ namespace _4RTools.Model
         public void ResetChainState()
         {
             currentChainStep = 0;
+            nextStepReadyAt = DateTime.MinValue;
+            triggerReleasedAt = DateTime.MinValue;
             // stepLastSentAt preserved — CD tracking must survive chain resets.
         }
     }
@@ -159,7 +168,6 @@ namespace _4RTools.Model
             }
 
             Keys thisk = (Keys)Enum.Parse(typeof(Keys), macroKey.key.ToString());
-            Thread.Sleep(macroKey.delay);
             Interop.PostMessage(roClient.process.MainWindowHandle, Constants.WM_KEYDOWN_MSG_ID, thisk, 0);
 
             if (macroKey.hasClick)
@@ -295,140 +303,142 @@ namespace _4RTools.Model
             {
                 if (chainConfig.trigger == Key.None) continue;
 
-                if (!Keyboard.IsKeyDown(chainConfig.trigger))
-                {
-                    chainConfig.ResetChainState();
-                    continue;
-                }
-
-                Dictionary<string, MacroKey> macro = chainConfig.macroEntries;
-                int step = chainConfig.currentChainStep;
-
-                string keyName = "in" + (step + 1) + "mac" + chainConfig.id;
-                if (!macro.ContainsKey(keyName))
-                {
-                    chainConfig.ResetChainState();
-                    continue;
-                }
-
-                MacroKey macroKey = macro[keyName];
-
-                if (macroKey.key == Key.None)
-                {
-                    if (macroKey.optional)
-                        chainConfig.currentChainStep = step + 1;
-                    else
-                        chainConfig.ResetChainState();
-                    continue;
-                }
-
                 DateTime now = DateTime.UtcNow;
 
-                // Per-step local cooldown guard.
-                // waitForCooldown=true → hold this step (do not replay setup steps)
-                // optional=true        → skip to next step
-                // otherwise            → reset chain to step 0
-                if (IsStepOnCooldown(chainConfig, step, macroKey, now))
+                if (!Keyboard.IsKeyDown(chainConfig.trigger))
                 {
-                    bool memPath = !string.IsNullOrEmpty(macroKey.skillId)
-                        && CdCalibrator.GetAddress(macroKey.skillId) != IntPtr.Zero;
-                    double cdRemMs = memPath
-                        ? CdCalibrator.ReadCd(macroKey.skillId) * 1000.0
-                        : macroKey.cooldownMs - (now - chainConfig.stepLastSentAt[step]).TotalMilliseconds;
-                    if (macroKey.waitForCooldown)
-                    {
-                        Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WAIT_CD remaining={cdRemMs:F0}ms");
-                        continue;
-                    }
+                    if (chainConfig.triggerReleasedAt == DateTime.MinValue)
+                        chainConfig.triggerReleasedAt = now;
 
-                    if (macroKey.optional)
-                    {
-                        Trace($"chain={chainConfig.id} step={step} key={macroKey.key} CD_SKIP remaining={cdRemMs:F0}ms");
-                        chainConfig.currentChainStep = step + 1;
-                        continue;
-                    }
-
-                    Trace($"chain={chainConfig.id} step={step} key={macroKey.key} CD_RESET remaining={cdRemMs:F0}ms");
-                    chainConfig.ResetChainState();
+                    bool pastGrace = chainConfig.triggerReleaseResetMs <= 0
+                        || (now - chainConfig.triggerReleasedAt).TotalMilliseconds >= chainConfig.triggerReleaseResetMs;
+                    if (pastGrace)
+                        chainConfig.ResetChainState();
                     continue;
                 }
+                chainConfig.triggerReleasedAt = DateTime.MinValue;
 
-                if (!IsConditionSatisfied(macroKey, activeStatusCodes, statusSnapshotAvailable))
+                Dictionary<string, MacroKey> macro = chainConfig.macroEntries;
+
+                // Drain: advance as many ready steps as possible without sleeping.
+                // Steps gated by nextStepReadyAt or a hard blocker break the loop early.
+                int maxDrain = Math.Max(macro.Count, 1);
+                for (int drain = 0; drain < maxDrain; drain++)
                 {
-                    // A configured condition is a hard gate by default. If the
-                    // step is optional, it may be skipped without firing.
-                    if (macroKey.optional)
+                    now = DateTime.UtcNow;
+
+                    if (now < chainConfig.nextStepReadyAt) break;
+
+                    int step = chainConfig.currentChainStep;
+                    string keyName = "in" + (step + 1) + "mac" + chainConfig.id;
+                    if (!macro.ContainsKey(keyName))
                     {
-                        chainConfig.currentChainStep = step + 1;
+                        chainConfig.ResetChainState();
+                        break;
                     }
-                    continue;
-                }
 
-                // fireOnlyWithNext: skip when the next step is not ready, so a
-                // setup skill is never spent without its immediately following skill.
-                if (macroKey.fireOnlyWithNext)
-                {
-                    int nextIdx = step + 1;
-                    string nextKeyName = "in" + (nextIdx + 1) + "mac" + chainConfig.id;
-                    if (macro.ContainsKey(nextKeyName))
+                    MacroKey macroKey = macro[keyName];
+
+                    if (macroKey.key == Key.None)
                     {
-                        MacroKey nextKey = macro[nextKeyName];
-                        if (!IsStepReady(
-                            chainConfig,
-                            nextIdx,
-                            nextKey,
-                            now,
-                            activeStatusCodes,
-                            statusSnapshotAvailable))
+                        if (macroKey.optional)
+                            chainConfig.currentChainStep = step + 1;
+                        else
+                            chainConfig.ResetChainState();
+                        break;
+                    }
+
+                    if (IsStepOnCooldown(chainConfig, step, macroKey, now))
+                    {
+                        bool memPath = !string.IsNullOrEmpty(macroKey.skillId)
+                            && CdCalibrator.GetAddress(macroKey.skillId) != IntPtr.Zero;
+                        double cdRemMs = memPath
+                            ? CdCalibrator.ReadCd(macroKey.skillId) * 1000.0
+                            : macroKey.cooldownMs - (now - chainConfig.stepLastSentAt[step]).TotalMilliseconds;
+
+                        if (macroKey.waitForCooldown)
                         {
-                            double nextCdRemaining = nextKey.cooldownMs > 0
-                                ? nextKey.cooldownMs - (now - chainConfig.stepLastSentAt[nextIdx]).TotalMilliseconds
-                                : 0;
-                            Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_SKIP nextKey={nextKey.key} cdRemaining={nextCdRemaining:F0}ms");
-                            chainConfig.currentChainStep = nextIdx;
+                            Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WAIT_CD remaining={cdRemMs:F0}ms");
+                            break;
+                        }
+                        if (macroKey.optional)
+                        {
+                            Trace($"chain={chainConfig.id} step={step} key={macroKey.key} CD_SKIP remaining={cdRemMs:F0}ms");
+                            chainConfig.currentChainStep = step + 1;
                             continue;
                         }
-                    }
-                }
-
-                SendMacroKey(roClient, macroKey, chainConfig);
-                Trace($"chain={chainConfig.id} step={step} key={macroKey.key} FIRE");
-                // Transition to Limbo if we have a calibrated memory address for this skill;
-                // otherwise fall back to the local timestamp guard.
-                bool usingMemoryCd = !string.IsNullOrEmpty(macroKey.skillId)
-                    && CdCalibrator.GetAddress(macroKey.skillId) != IntPtr.Zero;
-
-                if (usingMemoryCd)
-                {
-                    chainConfig.stepCdState[step] = SkillCdState.Limbo;
-                    chainConfig.stepLimboAt[step]  = DateTime.UtcNow;
-                }
-                else
-                {
-                    // Set stepLastSentAt to Now + castMs so the CD guard clears only after
-                    // castMs + cooldownMs from key press — matching when the game's CD actually starts.
-                    chainConfig.stepLastSentAt[step] = DateTime.UtcNow.AddMilliseconds(macroKey.castMs);
-                }
-
-                if (macroKey.postCastDelayMs > 0)
-                    Thread.Sleep(macroKey.postCastDelayMs);
-
-                int nextStep = step + 1;
-                bool chainComplete = !macro.ContainsKey("in" + (nextStep + 1) + "mac" + chainConfig.id)
-                    || macro["in" + (nextStep + 1) + "mac" + chainConfig.id].key == Key.None;
-
-                if (chainComplete)
-                {
-                    if (chainConfig.comboLoopBackStep >= 0)
-                        chainConfig.currentChainStep = chainConfig.comboLoopBackStep;
-                    else
+                        Trace($"chain={chainConfig.id} step={step} key={macroKey.key} CD_RESET remaining={cdRemMs:F0}ms");
                         chainConfig.ResetChainState();
-                }
-                else
-                {
+                        break;
+                    }
+
+                    if (!IsConditionSatisfied(macroKey, activeStatusCodes, statusSnapshotAvailable))
+                    {
+                        if (macroKey.optional)
+                        {
+                            chainConfig.currentChainStep = step + 1;
+                            continue;
+                        }
+                        break;
+                    }
+
+                    if (macroKey.fireOnlyWithNext)
+                    {
+                        int nextIdx = step + 1;
+                        string nextKeyName = "in" + (nextIdx + 1) + "mac" + chainConfig.id;
+                        if (macro.ContainsKey(nextKeyName))
+                        {
+                            MacroKey nextKey = macro[nextKeyName];
+                            if (!IsStepReady(chainConfig, nextIdx, nextKey, now, activeStatusCodes, statusSnapshotAvailable))
+                            {
+                                double nextCdRemaining = nextKey.cooldownMs > 0
+                                    ? nextKey.cooldownMs - (now - chainConfig.stepLastSentAt[nextIdx]).TotalMilliseconds
+                                    : 0;
+                                Trace($"chain={chainConfig.id} step={step} key={macroKey.key} WNEXT_SKIP nextKey={nextKey.key} cdRemaining={nextCdRemaining:F0}ms");
+                                chainConfig.currentChainStep = nextIdx;
+                                break;
+                            }
+                        }
+                    }
+
+                    SendMacroKey(roClient, macroKey, chainConfig);
+                    Trace($"chain={chainConfig.id} step={step} key={macroKey.key} FIRE");
+
+                    bool usingMemoryCd = !string.IsNullOrEmpty(macroKey.skillId)
+                        && CdCalibrator.GetAddress(macroKey.skillId) != IntPtr.Zero;
+                    if (usingMemoryCd)
+                    {
+                        chainConfig.stepCdState[step] = SkillCdState.Limbo;
+                        chainConfig.stepLimboAt[step] = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        chainConfig.stepLastSentAt[step] = DateTime.UtcNow.AddMilliseconds(macroKey.castMs);
+                    }
+
+                    // Combine step delay + postCastDelayMs into a single post-fire gate.
+                    // First step fires with no pre-delay; all inter-step spacing is post-fire.
+                    int postFireMs = macroKey.delay + macroKey.postCastDelayMs;
+                    chainConfig.nextStepReadyAt = postFireMs > 0
+                        ? DateTime.UtcNow.AddMilliseconds(postFireMs)
+                        : DateTime.MinValue;
+
+                    int nextStep = step + 1;
+                    bool chainComplete = !macro.ContainsKey("in" + (nextStep + 1) + "mac" + chainConfig.id)
+                        || macro["in" + (nextStep + 1) + "mac" + chainConfig.id].key == Key.None;
+
+                    if (chainComplete)
+                    {
+                        if (chainConfig.comboLoopBackStep >= 0)
+                            chainConfig.currentChainStep = chainConfig.comboLoopBackStep;
+                        else
+                            chainConfig.ResetChainState();
+                        break;
+                    }
                     chainConfig.currentChainStep = nextStep;
                 }
             }
+
             Thread.Sleep(15);
             return 0;
         }
